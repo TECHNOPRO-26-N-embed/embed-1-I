@@ -13,7 +13,11 @@ embed-1-{グループID}/
 │       ├── morning_challenge/   朝チャレ提出ファイル
 │       ├── docs/                要件定義書・設計書
 │       └── src/                 ソースコード
-└── shared/                      グループ全員で使う共有スペース
+├── shared/                      グループ全員で使う共有スペース
+└── templates/                   ← 講師が配布するテンプレート置き場
+    ├── requirements_template.md 要件定義書テンプレート
+    ├── member_setup_guide.md    初回セットアップ手順（受講生向け）
+    └── org_invitation_guide.md  Org招待手順（講師向け）
 ```
 
 ---
@@ -54,6 +58,13 @@ result_260522.json
 
 ### `shared/`
 グループ全員で共有したいファイル（メモ・参考コード等）を置いてください。
+
+### `templates/`
+講師が配布するテンプレートが置かれます。**編集せず**、自分の `docs/` にコピーして使ってください。
+```bash
+# テンプレートを自分のdocsフォルダにコピーする例
+cp templates/requirements_template.md members/{自分のGitHub ID}/docs/requirements.md
+```
 
 ---
 
