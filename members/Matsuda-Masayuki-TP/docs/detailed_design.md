@@ -1,0 +1,433 @@
+# 詳細設計書 — 組込み開発実習
+
+<!-- 作成者: 松田 眞幸/ 日付: 2026-05-22 / グループ: 1-i -->
+
+> **このドキュメントの目的**
+> 基本設計書（basic_design.md）で「**どのような構造で作るか**」を決めました。
+> この詳細設計書では「**各処理を具体的にどう実装するか**」を決めます。
+> 書き終わったとき、**コードの骨格がほぼ完成している**状態を目指してください。
+
+> [!NOTE]
+> **V字モデルにおける位置づけ**
+> 詳細設計書 ←→ **単体テスト**（関数・部品ごとのテスト）が対応します。
+> 「この関数が正しく動くか」の確認は Section 5 の単体テスト仕様書で計画します。
+> ※ 必須機能全体が動くかの「結合テスト」は基本設計書（Section 6）に記載します。
+
+---
+
+## 0. 基本設計書との接続確認
+
+| 項目 | basic_design.md から転記 |
+|:--|:--|
+| 作品タイトル | アプローチアラート |
+| 状態の種類（1-2 状態遷移から） | 9種類 |
+| 実装する関数の数（2-2 関数一覧から） | 11個 |
+| グローバル変数の合計バイト数（2-1 SRAM確認から） | 20B |
+
+---
+
+## 1. グローバル変数・定数の設計
+
+> ※ 基本設計書（2-1 データ設計）をもとに、**型と初期値まで**決めます。
+> ここで設計した変数は、この後の関数設計でそのまま使います。
+
+```
+const int trigPin = 9;
+const int echoPin = 10;
+const int buzzer = 3;
+
+// 距離関連
+long duration;
+int distance;
+
+// 状態管理
+int state = 0; 
+// 0:無音 1:弱 2:中 3:強
+
+// millis制御
+unsigned long prevMeasureTime = 0;
+unsigned long prevBeepTime = 0;
+bool beepState = false;
+
+// 設定値
+const int measureInterval = 100; // 測定周期(ms)
+```
+
+---
+
+## 2. 各関数の詳細設計
+
+> ※ 基本設計書（2-2 関数一覧）で定義した各関数の「中身」を設計します。
+> **疑似コード**（日本語＋処理の流れ）で書いてください。実際のC++コードは書かなくてOKです。
+
+---
+
+### `setup()` — 初期化処理
+
+```
+【処理の流れ】
+1. ピンモードを設定する
+   - PIN_BUTTON  → INPUT_PULLUP
+   - PIN_LED_*   → OUTPUT
+   - PIN_BUZZER  → OUTPUT
+
+2. ライブラリの初期化（使うものだけ）
+   - 例: lcd.begin(16, 2)
+   - 例: servo.attach(PIN_SERVO)
+
+3. Serial.begin(9600)（デバッグ用）
+
+4. 起動確認（任意）: 緑LEDを1秒点灯して消灯
+```
+
+**↓ 自分の setup() を設計してください**
+```
+【処理の流れ】
+1.ピンモードを設定する
+  trigPin > OUTPUT
+  echoPin > INPUT
+  buzzer  > OUTPUT
+
+2. Serial.begin(9600) (デバック用)
+```
+
+---
+
+### `loop()` — メインループ
+
+> ※ loop() は「状態ごとに何をするか」だけ書く。細かい処理は各関数に任せる。
+
+```
+【処理の流れ】
+
+＜毎ループ実行すること＞
+  - 入力を読む（readButton(), readSensor() などを呼ぶ）
+  - 現在時刻を取得: now = millis()
+
+＜currentState が 0（待機中）のとき＞
+  - センサー値を監視する
+  - 検知条件を満たしたら → currentState = 1
+
+＜currentState が 1（動作中）のとき＞
+  - メイン処理を行う
+  - 終了条件を満たしたら → currentState = 2
+
+＜currentState が 2（完了）のとき＞
+  - 完了表示をする
+  - リセットボタンが押されたら → currentState = 0
+
+＜currentState が 3（エラー）のとき＞
+  - エラー表示をする / リセットを待つ
+```
+
+**↓ 自分の loop() を設計してください**
+```
+【処理の流れ】
+
+＜毎ループ実行すること＞
+- 現在時刻を取得する: currentMillis = millis()
+- 距離測定の周期条件を確認する
+  - 条件: currentMillis - prevMeasureTime >= measureInterval
+  - 条件を満たしたら以下を実行
+    1. prevMeasureTime を currentMillis で更新
+    2. measureDistance() を呼び、distance を更新
+    3. judgeState(distance) を呼び、state を更新
+       - state=0: 無音
+       - state=1: 弱警告
+       - state=2: 中警告
+       - state=3: 強警告
+    4. シリアルに距離を出力する
+  - 条件を満たさない場合は距離測定をスキップし、前回の state を維持
+- controlBuzzer(currentMillis) を毎ループ呼び出して音を更新する
+
+＜state が 0（無音）のとき＞
+- noTone() でブザー停止
+
+＜state が 1（弱警告）のとき＞
+- 周波数1000Hz、周期1000msの断続音
+- currentMillis - prevBeepTime >= 500ms でON/OFFを切替
+
+＜state が 2（中警告）のとき＞
+- 周波数1500Hz、周期400msの断続音
+- currentMillis - prevBeepTime >= 200ms でON/OFFを切替
+
+＜state が 3（強警告）のとき＞
+- tone(2000Hz) を連続出力
+
+```
+
+---
+
+### （関数ごとに以下のブロックをコピーして追加してください）
+
+> ※ 基本設計書 2-2 の関数一覧に記載した関数を1つずつ設計します。
+
+---
+
+### `setup()` — ピン設定とシリアル初期化を行う
+
+**basic_design.md 2-2 との対応：** 初期化（setup()）
+
+**引数：** なし
+
+**戻り値：** なし（void）
+
+```
+【処理の流れ】
+1. trigPin を OUTPUT、echoPin を INPUT、buzzer を OUTPUT に設定する。
+2. Serial.begin(9600) でシリアル通信を初期化する。
+
+【エラー・異常ケース】
+- ピン番号設定ミス: 配線と設計値を照合して修正する。
+```
+
+---
+
+### `loop()` — 周期測定と状態別ブザー制御を繰り返す
+
+**basic_design.md 2-2 との対応：** （共通）メイン制御（loop()）
+
+**引数：** なし
+
+**戻り値：** なし（void）
+
+```
+【処理の流れ】
+1. currentMillis = millis() を取得する。
+2. measureInterval(100ms) 経過時のみ measureDistance() と judgeState() を実行し、distance/state を更新する。
+3. Serial.print/println で距離を出力する。
+4. controlBuzzer(currentMillis) を毎ループ呼び、state に応じた音を出す。
+
+【エラー・異常ケース】
+- 測定値が不正（0や過大）: judgeState 前に異常判定を入れ、警告状態へ遷移する。
+```
+
+---
+
+### `measureDistance()` — 超音波センサで距離(cm)を取得する
+
+**basic_design.md 2-2 との対応：** 距離測定（measureDistance()）/ 距離計算（calculateDistance()）
+
+**引数：** なし
+
+**戻り値：** int: 測定距離（cm）
+
+```
+【処理の流れ】
+1. Trig を LOW(2us)→HIGH(10us)→LOW の順で出力し、超音波を発信する。
+2. pulseIn(echoPin, HIGH) でエコー継続時間 duration を取得する。
+3. dist = duration * 0.034 / 2 で距離(cm)へ変換して返す。
+
+【エラー・異常ケース】
+- pulseIn が0を返す: タイムアウト/未接続の可能性として異常扱いにする。
+- 距離が有効範囲外: 異常値として警告処理へ回す。
+```
+
+---
+
+### `judgeState(int d)` — 距離に応じて警告状態を判定する
+
+**basic_design.md 2-2 との対応：** 状態判定（judgeState()）
+
+**引数：** `d`（int）: 判定対象の距離(cm)
+
+**戻り値：** int: 状態値（0:無音 / 1:弱 / 2:中 / 3:強）
+
+```
+【処理の流れ】
+1. d > 100 なら state=0（無音）を返す。
+2. 50 < d <= 100 なら state=1（弱警告）を返す。
+3. 20 < d <= 50 なら state=2（中警告）を返す。
+4. d <= 20 なら state=3（強警告）を返す。
+
+【エラー・異常ケース】
+- d が0や負値: 異常値として扱う判定分岐を別途追加する。
+```
+
+---
+
+### `controlBuzzer(unsigned long currentMillis)` — 状態に応じてブザー音を制御する
+
+**basic_design.md 2-2 との対応：** ブザー制御（controlBuzzer()）/ 音出力（playTone()相当）
+
+**引数：** `currentMillis`（unsigned long）: 現在時刻(ms)
+
+**戻り値：** なし（void）
+
+```
+【処理の流れ】
+1. state=0 のとき noTone() で停止して終了する。
+2. state=1 は interval=1000ms/freq=1000Hz、state=2 は interval=400ms/freq=1500Hz を設定する。
+3. state=3 は tone(2000) を連続出力して終了する。
+4. state=1/2 では currentMillis - prevBeepTime >= interval/2 ごとに beepState を反転し、tone/noTone を切替える。
+
+【エラー・異常ケース】
+- state が想定外の値: 安全のため noTone() を実行して終了する。
+```
+
+---
+
+## 3. 重要ロジックの詳細設計
+
+### 3-1. チャタリング防止（デバウンス処理）
+
+> ※ ボタンを使う場合は必ず設計してください。
+
+```
+【考え方】
+  ボタンが押されたとき、50ms 以内の連続入力は「同じ1回の押下」として無視する。
+
+【処理の流れ】
+  1. ボタンのデジタル値を読む（digitalRead）
+  2. 前回確定した時刻（lastDebounceTime）からの経過時間を計算する
+  3. 経過時間 < DEBOUNCE_DELAY（例: 50ms）→ 無視する
+  4. 経過時間 ≥ DEBOUNCE_DELAY → ボタンの状態として確定する
+  5. lastDebounceTime を更新する
+
+【必要な変数（Section 1 に追加済みか確認）】
+  lastDebounceTime : unsigned long   // 前回確定した時刻
+  DEBOUNCE_DELAY   : const int = 50  // チャタリング判定時間（ms）
+```
+
+---
+
+### 3-2. millis() を使ったタイマー管理
+
+```
+【考え方】
+  「前回実行した時刻」を記録しておき、「今の時刻 − 前回時刻 ≥ 周期」なら実行する。
+
+【処理の流れ（例: LED点滅）】
+  1. now = millis()
+  2. now - lastMillis_LED >= LED_INTERVAL かどうか確認
+  3. 条件を満たした場合: LEDのON/OFFを切り替え、lastMillis_LED = now
+  4. 条件を満たさない場合: 何もしない（次のループで再チェック）
+
+【自分のシステムで millis() を使う処理】
+  1. 距離測定周期の管理（100ms）
+    - currentMillis = millis() を取得する。
+    - currentMillis - prevMeasureTime >= measureInterval(100) を満たした場合のみ測定する。
+    - 測定実行後、prevMeasureTime = currentMillis に更新する。
+    - これにより、距離測定は100msごとに実行され、他処理を停止させない。
+
+  2. 弱/中警告の断続音管理（non-blocking）
+    - state=1（弱）: interval=1000ms, freq=1000Hz
+    - state=2（中）: interval=400ms, freq=1500Hz
+    - currentMillis - prevBeepTime >= interval/2 を満たしたら beepState を反転する。
+    - beepState=true のとき tone(buzzer, freq)、false のとき noTone(buzzer) を実行する。
+    - 切替実行後、prevBeepTime = currentMillis に更新する。
+
+  3. 強警告/無音の管理
+    - state=3（強）: tone(buzzer, 2000) を連続出力する。
+    - state=0（無音）: noTone(buzzer) で停止する。
+    - いずれも delay() を使わず、次ループへ即時移行する。
+```
+
+---
+
+### 3-3. その他の重要ロジック（任意）
+
+> **【任意】** 複雑なロジックがある場合のみ記入してください。
+> 例：「距離に応じたLED点灯パターン」「ゲームの衝突判定」「温度の閾値判定」
+
+```
+【処理の流れ】
+1.
+2.
+3.
+
+【入力値と出力値の関係】
+
+```
+
+---
+
+## 4. デバッグ出力計画（任意）
+
+> **【任意】** 関数設計（Section 2）と並行して記入すると効果的です。
+> 「動かない」ときに何を確認すればいいかを事前に計画しておきます。
+> 実装後は不要な Serial.println() を削除すること。
+
+| No | 確認したい内容 | 挿入する関数 | Serial.println の内容例 |
+|:---|:---|:---|:---|
+| 1 | センサー値が正しく取れているか | `readSensor()` | `Serial.println(sensorValue);` |
+| 2 | 状態遷移が正しく起きているか | `loop()` | `Serial.println(currentState);` |
+| 3 | チャタリング処理が効いているか | `readButton()` | `Serial.println("btn confirmed");` |
+| 4 |  |  |  |
+
+---
+
+## 5. 単体テスト仕様書（V字モデル：詳細設計 ↔ 単体テスト）
+
+> ※ 各関数・部品が「単体で正しく動くか」を確認するテスト項目を設計します。
+> 「実際の結果」欄は実装後に記入します。
+
+### 5-1. 入力系テスト
+
+| No | テスト対象の関数 | 入力・操作 | 期待する結果 | 実際の結果 | 合否 |
+|:---|:---|:---|:---|:---|:---|
+| 1 | readButton() | タクトスイッチを1回押す | true が返る | | [ ] |
+| 2 | readButton() | スイッチを素早く2回押す | 1回分だけ true になる | | [ ] |
+| 3 | readSensor() | センサーを正常範囲で使う | 仕様範囲内の値が返る | | [ ] |
+| 4 | readSensor() | センサーを遮蔽・範囲外に向ける | 誤動作しない | | [ ] |
+| 5 | （自分の関数を追加） | | | | [ ] |
+
+### 5-2. 出力系テスト
+
+| No | テスト対象の関数 | 入力・操作 | 期待する結果 | 実際の結果 | 合否 |
+|:---|:---|:---|:---|:---|:---|
+| 1 | updateOutput(0) | state=0（待機中）を渡す | 緑LEDが点滅する | | [ ] |
+| 2 | updateOutput(1) | state=1（動作中）を渡す | 赤LEDが点灯、ブザーが鳴る | | [ ] |
+| 3 | （自分の状態・関数を追加） | | | | [ ] |
+
+### 5-3. タイミング・並行動作テスト
+
+| No | テスト内容 | テスト手順 | 期待する結果 | 実際の結果 | 合否 |
+|:---|:---|:---|:---|:---|:---|
+| 1 | delay()による処理停止がないか | LED点滅中にボタンを押す | ボタン入力が無視されない | | [ ] |
+| 2 | millis()タイマーの周期精度 | 点滅をストップウォッチで確認 | 設計した周期（例:500ms）通りに点滅 | | [ ] |
+
+---
+
+## 6. AIレビュー記録
+
+> グループレビューの前に必ず実施してください。
+
+### Q1: 実装上の問題確認
+
+> 「この詳細設計書に書いた関数と処理フローをもとに Arduino でコードを書きます。バグになりやすい箇所・処理の抜け・型の問題はありますか？」
+
+**AIの回答（要約）：**
+
+**対応した内容：**
+
+---
+
+### Q2: 単体テスト仕様の確認
+
+> 「Section 5 の単体テスト仕様書で、各関数の動作が正しく検証できていますか？テストが不足している項目や、境界値テストが必要な箇所を教えてください。」
+
+**AIの回答（要約）：**
+
+**対応した内容：**
+
+---
+
+## 7. グループレビュー記録
+
+### 7-1. 指摘一覧
+
+| No | 指摘内容 | 指摘者 | 対応 |
+|:---|:---|:---|:---|
+| 1 |  |  |  |
+| 2 |  |  |  |
+| 3 |  |  |  |
+
+### 7-2. レビューを受けて変更した点
+
+-
+-
+
+---
+
+*初版: YYYY-MM-DD / AIレビュー: YYYY-MM-DD / グループレビュー後更新: YYYY-MM-DD*
