@@ -19,38 +19,31 @@
 
 | 項目 | basic_design.md から転記 |
 |:--|:--|
-| 作品タイトル | |
-| 状態の種類（1-2 状態遷移から） | |
-| 実装する関数の数（2-2 関数一覧から） | 　個 |
-| グローバル変数の合計バイト数（2-1 SRAM確認から） | 　B |
-
----
-
+| 状態の種類（1-2 状態遷移から） | 待機中／音再生中／曲作成中／目覚まし待機／アラーム発動 |
 ## 1. グローバル変数・定数の設計
 
 > ※ 基本設計書（2-1 データ設計）をもとに、**型と初期値まで**決めます。
-> ここで設計した変数は、この後の関数設計でそのまま使います。
 
 ```
-【ピン定義】（basic_design.md 3-1 から転記）
-  PIN_BUTTON    = 2    // タクトスイッチ（INPUT_PULLUP）
-  PIN_LED_RED   = 9    // 赤LED
-  PIN_LED_GREEN = 10   // 緑LED
-  PIN_BUZZER    = 11   // パッシブブザー
+  PIN_SEG3        = 5    // セグメント3
+  PIN_MOTOR       = 7    // モーター
+  PIN_LED_RED     = 9    // LED（赤）
+  PIN_LED_GREEN   = 10   // LED（緑）
+  PIN_LED_BLUE    = 11   // LED（青）
+  LCD_SDA         = A4   // LCD（I2C）SDA
 
-【状態管理】（basic_design.md 1-2 の状態名から転記）
-  currentState  : int = 0   // 0:待機 1:動作中 2:完了 3:エラー
+  lastMillis_LED      : unsigned long = 0
 
-【タイマー（millis()用）】（basic_design.md 2-3 から転記）
-  lastMillis_LED    : unsigned long = 0
-  lastMillis_Sensor : unsigned long = 0
-
-【センサー・入力値】（basic_design.md 2-1 から転記）
-  sensorValue   : int  = 0
-  buttonState   : bool = false
+  remoteValue     : int  = 0
+  micValue        : int  = 0
+  buttonFlag      : bool = false
 
 【その他のフラグ・カウンター】
-  （自分のものを追加）
+  selectedTone    : int  = 0
+  alarmTime       : int  = 0
+  isAlarmActive   : bool = false
+  songData[]      : int配列 = {0}
+  songLength      : int  = 0
 ```
 
 ---
@@ -83,9 +76,15 @@
 **↓ 自分の setup() を設計してください**
 ```
 【処理の流れ】
-1.
-2.
-3.
+1. 各ピンのモードを設定する
+  - PIN_REMOTE, PIN_BUTTON → INPUT_PULLUP
+  - PIN_LED_RED, PIN_LED_GREEN, PIN_LED_BLUE → OUTPUT
+  - PIN_BUZZER, PIN_MOTOR, PIN_SEG1〜4 → OUTPUT
+2. LCD/I2C等のライブラリ初期化
+  - lcd.begin(16, 2) など
+3. Serial.begin(9600) でデバッグ出力有効化
+4. 起動確認として緑LEDを1秒点灯し消灯
+5. 変数・フラグ類を初期化（currentState=0, 各種タイマー=0, etc）
 ```
 
 ---
@@ -122,16 +121,31 @@
 【処理の流れ】
 
 ＜毎ループ実行すること＞
+  - readButton(), readRemote(), readSensor() で入力取得
+  - now = millis() で現在時刻取得
+  - updateOutput(currentState) で出力更新
 
+＜currentState が 0（待機中）のとき＞
+  - LCDに待機メッセージ表示
+  - リモコン操作で音選択→ currentState=1
+  - 曲作成モード選択→ currentState=2
+  - 目覚ましモード選択→ currentState=3
 
-＜currentState が 　　 のとき＞
+＜currentState が 1（音再生中）のとき＞
+  - playTone(selectedTone)で音再生・LED点灯
+  - 停止コマンドまたは曲終了→ currentState=0
 
+＜currentState が 2（曲作成中）のとき＞
+  - recordSong()で入力音階・長さを記録
+  - 保存/終了で currentState=0
 
-＜currentState が 　　 のとき＞
+＜currentState が 3（目覚まし待機）のとき＞
+  - LCDに時刻表示、alarmControl()で時刻監視
+  - アラーム時刻到達→ currentState=4
 
-
-＜currentState が 　　 のとき＞
-
+＜currentState が 4（アラーム発動）のとき＞
+  - ブザー・LED・モーター動作
+  - 停止コマンドで currentState=0
 ```
 
 ---
@@ -142,22 +156,118 @@
 
 ---
 
-### `関数名()` — （役割を1行で書く）
-
-**basic_design.md 2-2 との対応：** （基本設計書の関数一覧の説明を転記）
-
-**引数：** `引数名`（型）: 何の値か
-
-**戻り値：** 型（なしの場合は void）
-
+### `readButton()` — チャタリング処理済みのボタン状態を返す
+**basic_design.md 2-2 との対応：** ボタン入力を安定して取得する
+**引数：** なし
+**戻り値：** bool
 ```
 【処理の流れ】
-1.
-2.
-3.
+1. ボタンのデジタル値を読む
+2. 前回確定時刻からの経過時間を計算
+3. 50ms未満なら無視、50ms以上なら状態を確定
+4. 状態が変化した場合のみtrueを返す
 
 【エラー・異常ケース】
-- 異常な値が来た場合:
+- ボタン配線断線時は常にHIGHとなるため、異常検知可能
+```
+
+### `readRemote()` — リモコンの入力値を取得
+**basic_design.md 2-2 との対応：** リモコン受信値を取得し、コマンド判定に使う
+**引数：** なし
+**戻り値：** int（受信コード）
+```
+【処理の流れ】
+1. IRremoteライブラリ等で受信データを取得
+2. 有効なデータがあればremoteValueに格納
+3. 受信がなければ前回値または0を返す
+
+【エラー・異常ケース】
+- 受信エラー時は0またはエラーコードを返す
+```
+
+### `readSensor()` — センサー値を取得して更新
+**basic_design.md 2-2 との対応：** センサー値を取得し、範囲外は無視
+**引数：** なし
+**戻り値：** int（センサー値）
+```
+【処理の流れ】
+1. analogReadやdigitalReadで値を取得
+2. 仕様範囲外（例:0や400cm超）は無視し、前回値を保持
+3. 有効値ならsensorValueを更新
+
+【エラー・異常ケース】
+- センサー断線・異常値は無視し、前回値を返す
+```
+
+### `updateOutput(state)` — 現在のstateに応じてLED/ブザー制御
+**basic_design.md 2-2 との対応：** 状態に応じて出力を切り替える
+**引数：** state（int）: 現在の状態
+**戻り値：** void
+```
+【処理の流れ】
+1. state=0: 緑LED点滅、他消灯
+2. state=1: 赤LED点灯、ブザーON
+3. state=2: 青LED点灯、LCDに作成情報表示
+4. state=3: LCDに時刻表示、LED消灯
+5. state=4: 全LED点灯、ブザー・モーターON
+
+【エラー・異常ケース】
+- 出力ピン断線時はエラー表示
+```
+
+### `playTone(tone)` — 選択した音を再生
+**basic_design.md 2-2 との対応：** ブザーで音を鳴らし、LEDを点灯
+**引数：** tone（int）: 再生する音階番号
+**戻り値：** void
+```
+【処理の流れ】
+1. tone()関数等で指定音を再生
+2. 音階に応じてLEDを点灯
+3. 再生終了後はLED消灯
+
+【エラー・異常ケース】
+- 不正なtone値は無視
+```
+
+### `recordSong()` — 入力に応じて曲データを記録
+**basic_design.md 2-2 との対応：** リモコンや入力で音階・長さを記録
+**引数：** なし
+**戻り値：** void
+```
+【処理の流れ】
+1. 入力値（音階・長さ）を受け付けsongData[]に格納
+2. 入力終了または保存コマンドで記録完了
+3. LCDに作成情報を表示
+
+【エラー・異常ケース】
+- 配列長超過や不正値は無視
+```
+
+### `alarmControl()` — 目覚まし時刻の監視・発動
+**basic_design.md 2-2 との対応：** 目覚まし時刻の監視とアラーム発動
+**引数：** なし
+**戻り値：** void
+```
+【処理の流れ】
+1. 現在時刻とalarmTimeを比較
+2. 一致したらcurrentState=4（アラーム発動）
+3. LCDに時刻や状態を表示
+
+【エラー・異常ケース】
+- 不正な時刻設定は無視
+```
+
+### `controlMotor()` — 曲再生時にモーターを回す
+**basic_design.md 2-2 との対応：** 曲再生中のみモーターON/OFF
+**引数：** なし
+**戻り値：** void
+```
+【処理の流れ】
+1. currentState=1または4のときモーターON
+2. それ以外はOFF
+
+【エラー・異常ケース】
+- モーター配線断線時はエラー表示
 ```
 
 ---
@@ -199,7 +309,11 @@
   4. 条件を満たさない場合: 何もしない（次のループで再チェック）
 
 【自分のシステムで millis() を使う処理】
-  （basic_design.md 2-3 のタイミング設計から転記して具体化する）
+  ・LED点滅（500ms周期でON/OFF切替、待機中のみ）
+  ・ボタン監視（50ms周期で状態取得、チャタリング対策）
+  ・リモコン監視（100ms周期で入力取得）
+  ・曲再生（音長ごとに次の音へ遷移）
+  ・目覚まし監視（1s周期で時刻チェック）
 ```
 
 ---
@@ -211,12 +325,13 @@
 
 ```
 【処理の流れ】
-1.
-2.
-3.
+（例：音階に応じたLED点灯パターン）
+1. playTone()でtone値を受け取る
+2. tone値に応じてLED（赤・緑・青）を切り替え点灯
+3. tone再生終了後は全LED消灯
 
 【入力値と出力値の関係】
-
+tone=1 → 赤LED, tone=2 → 緑LED, tone=3 → 青LED
 ```
 
 ---
@@ -232,7 +347,9 @@
 | 1 | センサー値が正しく取れているか | `readSensor()` | `Serial.println(sensorValue);` |
 | 2 | 状態遷移が正しく起きているか | `loop()` | `Serial.println(currentState);` |
 | 3 | チャタリング処理が効いているか | `readButton()` | `Serial.println("btn confirmed");` |
-| 4 |  |  |  |
+| 4 | リモコン入力が正しく取得できているか | `readRemote()` | `Serial.println(remoteValue);` |
+| 5 | 曲データが正しく記録されているか | `recordSong()` | `Serial.println(songData[i]);` |
+| 6 | 目覚まし時刻が正しく監視されているか | `alarmControl()` | `Serial.println(alarmTime);` |
 
 ---
 
@@ -249,7 +366,8 @@
 | 2 | readButton() | スイッチを素早く2回押す | 1回分だけ true になる | | [ ] |
 | 3 | readSensor() | センサーを正常範囲で使う | 仕様範囲内の値が返る | | [ ] |
 | 4 | readSensor() | センサーを遮蔽・範囲外に向ける | 誤動作しない | | [ ] |
-| 5 | （自分の関数を追加） | | | | [ ] |
+| 5 | readRemote() | リモコンでボタンを押す | 受信値が正しく返る | | [ ] |
+| 6 | recordSong() | 曲作成モードで音階・長さを入力 | songData[]に正しく記録される | | [ ] |
 
 ### 5-2. 出力系テスト
 
@@ -257,7 +375,8 @@
 |:---|:---|:---|:---|:---|:---|
 | 1 | updateOutput(0) | state=0（待機中）を渡す | 緑LEDが点滅する | | [ ] |
 | 2 | updateOutput(1) | state=1（動作中）を渡す | 赤LEDが点灯、ブザーが鳴る | | [ ] |
-| 3 | （自分の状態・関数を追加） | | | | [ ] |
+| 3 | updateOutput(2) | state=2（曲作成中）を渡す | 青LEDが点灯、LCDに作成情報表示 | | [ ] |
+| 4 | updateOutput(4) | state=4（アラーム発動）を渡す | 全LED点灯、ブザー・モーターON | | [ ] |
 
 ### 5-3. タイミング・並行動作テスト
 
@@ -265,6 +384,7 @@
 |:---|:---|:---|:---|:---|:---|
 | 1 | delay()による処理停止がないか | LED点滅中にボタンを押す | ボタン入力が無視されない | | [ ] |
 | 2 | millis()タイマーの周期精度 | 点滅をストップウォッチで確認 | 設計した周期（例:500ms）通りに点滅 | | [ ] |
+| 3 | 曲再生中に他の入力が反応するか | 曲再生中にボタンやリモコンを操作 | 並行して入力が反応する | | [ ] |
 
 ---
 
