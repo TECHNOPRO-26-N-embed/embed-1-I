@@ -1,6 +1,6 @@
 # 詳細設計書 — 組込み開発実習
 
-<!-- 作成者: 松田 眞幸/ 日付: 2026-05-22 / グループ: 1-i -->
+<!-- 作成者: あなたの名前 / 日付: YYYY-MM-DD / グループ: 〇-〇 -->
 
 > **このドキュメントの目的**
 > 基本設計書（basic_design.md）で「**どのような構造で作るか**」を決めました。
@@ -19,38 +19,31 @@
 
 | 項目 | basic_design.md から転記 |
 |:--|:--|
-| 作品タイトル | アプローチアラート |
-| 状態の種類（1-2 状態遷移から） | 9種類 |
-| 実装する関数の数（2-2 関数一覧から） | 11個 |
-| グローバル変数の合計バイト数（2-1 SRAM確認から） | 20B |
-
----
-
+| 状態の種類（1-2 状態遷移から） | 待機中／音再生中／曲作成中／目覚まし待機／アラーム発動 |
 ## 1. グローバル変数・定数の設計
 
 > ※ 基本設計書（2-1 データ設計）をもとに、**型と初期値まで**決めます。
-> ここで設計した変数は、この後の関数設計でそのまま使います。
 
 ```
-const int trigPin = 9;
-const int echoPin = 10;
-const int buzzer = 3;
+  PIN_SEG3        = 5    // セグメント3
+  PIN_MOTOR       = 7    // モーター
+  PIN_LED_RED     = 9    // LED（赤）
+  PIN_LED_GREEN   = 10   // LED（緑）
+  PIN_LED_BLUE    = 11   // LED（青）
+  LCD_SDA         = A4   // LCD（I2C）SDA
 
-// 距離関連
-long duration;
-int distance;
+  lastMillis_LED      : unsigned long = 0
 
-// 状態管理
-int state = 0; 
-// 0:無音 1:弱 2:中 3:強
+  remoteValue     : int  = 0
+  micValue        : int  = 0
+  buttonFlag      : bool = false
 
-// millis制御
-unsigned long prevMeasureTime = 0;
-unsigned long prevBeepTime = 0;
-bool beepState = false;
-
-// 設定値
-const int measureInterval = 100; // 測定周期(ms)
+【その他のフラグ・カウンター】
+  selectedTone    : int  = 0
+  alarmTime       : int  = 0
+  isAlarmActive   : bool = false
+  songData[]      : int配列 = {0}
+  songLength      : int  = 0
 ```
 
 ---
@@ -83,12 +76,15 @@ const int measureInterval = 100; // 測定周期(ms)
 **↓ 自分の setup() を設計してください**
 ```
 【処理の流れ】
-1.ピンモードを設定する
-  trigPin > OUTPUT
-  echoPin > INPUT
-  buzzer  > OUTPUT
-
-2. Serial.begin(9600) (デバック用)
+1. 各ピンのモードを設定する
+  - PIN_REMOTE, PIN_BUTTON → INPUT_PULLUP
+  - PIN_LED_RED, PIN_LED_GREEN, PIN_LED_BLUE → OUTPUT
+  - PIN_BUZZER, PIN_MOTOR, PIN_SEG1〜4 → OUTPUT
+2. LCD/I2C等のライブラリ初期化
+  - lcd.begin(16, 2) など
+3. Serial.begin(9600) でデバッグ出力有効化
+4. 起動確認として緑LEDを1秒点灯し消灯
+5. 変数・フラグ類を初期化（currentState=0, 各種タイマー=0, etc）
 ```
 
 ---
@@ -125,35 +121,31 @@ const int measureInterval = 100; // 測定周期(ms)
 【処理の流れ】
 
 ＜毎ループ実行すること＞
-- 現在時刻を取得する: currentMillis = millis()
-- 距離測定の周期条件を確認する
-  - 条件: currentMillis - prevMeasureTime >= measureInterval
-  - 条件を満たしたら以下を実行
-    1. prevMeasureTime を currentMillis で更新
-    2. measureDistance() を呼び、distance を更新
-    3. judgeState(distance) を呼び、state を更新
-       - state=0: 無音
-       - state=1: 弱警告
-       - state=2: 中警告
-       - state=3: 強警告
-    4. シリアルに距離を出力する
-  - 条件を満たさない場合は距離測定をスキップし、前回の state を維持
-- controlBuzzer(currentMillis) を毎ループ呼び出して音を更新する
+  - readButton(), readRemote(), readSensor() で入力取得
+  - now = millis() で現在時刻取得
+  - updateOutput(currentState) で出力更新
 
-＜state が 0（無音）のとき＞
-- noTone() でブザー停止
+＜currentState が 0（待機中）のとき＞
+  - LCDに待機メッセージ表示
+  - リモコン操作で音選択→ currentState=1
+  - 曲作成モード選択→ currentState=2
+  - 目覚ましモード選択→ currentState=3
 
-＜state が 1（弱警告）のとき＞
-- 周波数1000Hz、周期1000msの断続音
-- currentMillis - prevBeepTime >= 500ms でON/OFFを切替
+＜currentState が 1（音再生中）のとき＞
+  - playTone(selectedTone)で音再生・LED点灯
+  - 停止コマンドまたは曲終了→ currentState=0
 
-＜state が 2（中警告）のとき＞
-- 周波数1500Hz、周期400msの断続音
-- currentMillis - prevBeepTime >= 200ms でON/OFFを切替
+＜currentState が 2（曲作成中）のとき＞
+  - recordSong()で入力音階・長さを記録
+  - 保存/終了で currentState=0
 
-＜state が 3（強警告）のとき＞
-- tone(2000Hz) を連続出力
+＜currentState が 3（目覚まし待機）のとき＞
+  - LCDに時刻表示、alarmControl()で時刻監視
+  - アラーム時刻到達→ currentState=4
 
+＜currentState が 4（アラーム発動）のとき＞
+  - ブザー・LED・モーター動作
+  - 停止コマンドで currentState=0
 ```
 
 ---
@@ -164,105 +156,118 @@ const int measureInterval = 100; // 測定周期(ms)
 
 ---
 
-### `setup()` — ピン設定とシリアル初期化を行う
-
-**basic_design.md 2-2 との対応：** 初期化（setup()）
-
+### `readButton()` — チャタリング処理済みのボタン状態を返す
+**basic_design.md 2-2 との対応：** ボタン入力を安定して取得する
 **引数：** なし
-
-**戻り値：** なし（void）
-
+**戻り値：** bool
 ```
 【処理の流れ】
-1. trigPin を OUTPUT、echoPin を INPUT、buzzer を OUTPUT に設定する。
-2. Serial.begin(9600) でシリアル通信を初期化する。
+1. ボタンのデジタル値を読む
+2. 前回確定時刻からの経過時間を計算
+3. 50ms未満なら無視、50ms以上なら状態を確定
+4. 状態が変化した場合のみtrueを返す
 
 【エラー・異常ケース】
-- ピン番号設定ミス: 配線と設計値を照合して修正する。
+- ボタン配線断線時は常にHIGHとなるため、異常検知可能
 ```
 
----
-
-### `loop()` — 周期測定と状態別ブザー制御を繰り返す
-
-**basic_design.md 2-2 との対応：** （共通）メイン制御（loop()）
-
+### `readRemote()` — リモコンの入力値を取得
+**basic_design.md 2-2 との対応：** リモコン受信値を取得し、コマンド判定に使う
 **引数：** なし
-
-**戻り値：** なし（void）
-
+**戻り値：** int（受信コード）
 ```
 【処理の流れ】
-1. currentMillis = millis() を取得する。
-2. measureInterval(100ms) 経過時のみ measureDistance() と judgeState() を実行し、distance/state を更新する。
-3. Serial.print/println で距離を出力する。
-4. controlBuzzer(currentMillis) を毎ループ呼び、state に応じた音を出す。
+1. IRremoteライブラリ等で受信データを取得
+2. 有効なデータがあればremoteValueに格納
+3. 受信がなければ前回値または0を返す
 
 【エラー・異常ケース】
-- 測定値が不正（0や過大）: judgeState 前に異常判定を入れ、警告状態へ遷移する。
+- 受信エラー時は0またはエラーコードを返す
 ```
 
----
-
-### `measureDistance()` — 超音波センサで距離(cm)を取得する
-
-**basic_design.md 2-2 との対応：** 距離測定（measureDistance()）/ 距離計算（calculateDistance()）
-
+### `readSensor()` — センサー値を取得して更新
+**basic_design.md 2-2 との対応：** センサー値を取得し、範囲外は無視
 **引数：** なし
-
-**戻り値：** int: 測定距離（cm）
-
+**戻り値：** int（センサー値）
 ```
 【処理の流れ】
-1. Trig を LOW(2us)→HIGH(10us)→LOW の順で出力し、超音波を発信する。
-2. pulseIn(echoPin, HIGH) でエコー継続時間 duration を取得する。
-3. dist = duration * 0.034 / 2 で距離(cm)へ変換して返す。
+1. analogReadやdigitalReadで値を取得
+2. 仕様範囲外（例:0や400cm超）は無視し、前回値を保持
+3. 有効値ならsensorValueを更新
 
 【エラー・異常ケース】
-- pulseIn が0を返す: タイムアウト/未接続の可能性として異常扱いにする。
-- 距離が有効範囲外: 異常値として警告処理へ回す。
+- センサー断線・異常値は無視し、前回値を返す
 ```
 
----
-
-### `judgeState(int d)` — 距離に応じて警告状態を判定する
-
-**basic_design.md 2-2 との対応：** 状態判定（judgeState()）
-
-**引数：** `d`（int）: 判定対象の距離(cm)
-
-**戻り値：** int: 状態値（0:無音 / 1:弱 / 2:中 / 3:強）
-
+### `updateOutput(state)` — 現在のstateに応じてLED/ブザー制御
+**basic_design.md 2-2 との対応：** 状態に応じて出力を切り替える
+**引数：** state（int）: 現在の状態
+**戻り値：** void
 ```
 【処理の流れ】
-1. d > 100 なら state=0（無音）を返す。
-2. 50 < d <= 100 なら state=1（弱警告）を返す。
-3. 20 < d <= 50 なら state=2（中警告）を返す。
-4. d <= 20 なら state=3（強警告）を返す。
+1. state=0: 緑LED点滅、他消灯
+2. state=1: 赤LED点灯、ブザーON
+3. state=2: 青LED点灯、LCDに作成情報表示
+4. state=3: LCDに時刻表示、LED消灯
+5. state=4: 全LED点灯、ブザー・モーターON
 
 【エラー・異常ケース】
-- d が0や負値: 異常値として扱う判定分岐を別途追加する。
+- 出力ピン断線時はエラー表示
 ```
 
----
-
-### `controlBuzzer(unsigned long currentMillis)` — 状態に応じてブザー音を制御する
-
-**basic_design.md 2-2 との対応：** ブザー制御（controlBuzzer()）/ 音出力（playTone()相当）
-
-**引数：** `currentMillis`（unsigned long）: 現在時刻(ms)
-
-**戻り値：** なし（void）
-
+### `playTone(tone)` — 選択した音を再生
+**basic_design.md 2-2 との対応：** ブザーで音を鳴らし、LEDを点灯
+**引数：** tone（int）: 再生する音階番号
+**戻り値：** void
 ```
 【処理の流れ】
-1. state=0 のとき noTone() で停止して終了する。
-2. state=1 は interval=1000ms/freq=1000Hz、state=2 は interval=400ms/freq=1500Hz を設定する。
-3. state=3 は tone(2000) を連続出力して終了する。
-4. state=1/2 では currentMillis - prevBeepTime >= interval/2 ごとに beepState を反転し、tone/noTone を切替える。
+1. tone()関数等で指定音を再生
+2. 音階に応じてLEDを点灯
+3. 再生終了後はLED消灯
 
 【エラー・異常ケース】
-- state が想定外の値: 安全のため noTone() を実行して終了する。
+- 不正なtone値は無視
+```
+
+### `recordSong()` — 入力に応じて曲データを記録
+**basic_design.md 2-2 との対応：** リモコンや入力で音階・長さを記録
+**引数：** なし
+**戻り値：** void
+```
+【処理の流れ】
+1. 入力値（音階・長さ）を受け付けsongData[]に格納
+2. 入力終了または保存コマンドで記録完了
+3. LCDに作成情報を表示
+
+【エラー・異常ケース】
+- 配列長超過や不正値は無視
+```
+
+### `alarmControl()` — 目覚まし時刻の監視・発動
+**basic_design.md 2-2 との対応：** 目覚まし時刻の監視とアラーム発動
+**引数：** なし
+**戻り値：** void
+```
+【処理の流れ】
+1. 現在時刻とalarmTimeを比較
+2. 一致したらcurrentState=4（アラーム発動）
+3. LCDに時刻や状態を表示
+
+【エラー・異常ケース】
+- 不正な時刻設定は無視
+```
+
+### `controlMotor()` — 曲再生時にモーターを回す
+**basic_design.md 2-2 との対応：** 曲再生中のみモーターON/OFF
+**引数：** なし
+**戻り値：** void
+```
+【処理の流れ】
+1. currentState=1または4のときモーターON
+2. それ以外はOFF
+
+【エラー・異常ケース】
+- モーター配線断線時はエラー表示
 ```
 
 ---
@@ -304,23 +309,11 @@ const int measureInterval = 100; // 測定周期(ms)
   4. 条件を満たさない場合: 何もしない（次のループで再チェック）
 
 【自分のシステムで millis() を使う処理】
-  1. 距離測定周期の管理（100ms）
-    - currentMillis = millis() を取得する。
-    - currentMillis - prevMeasureTime >= measureInterval(100) を満たした場合のみ測定する。
-    - 測定実行後、prevMeasureTime = currentMillis に更新する。
-    - これにより、距離測定は100msごとに実行され、他処理を停止させない。
-
-  2. 弱/中警告の断続音管理（non-blocking）
-    - state=1（弱）: interval=1000ms, freq=1000Hz
-    - state=2（中）: interval=400ms, freq=1500Hz
-    - currentMillis - prevBeepTime >= interval/2 を満たしたら beepState を反転する。
-    - beepState=true のとき tone(buzzer, freq)、false のとき noTone(buzzer) を実行する。
-    - 切替実行後、prevBeepTime = currentMillis に更新する。
-
-  3. 強警告/無音の管理
-    - state=3（強）: tone(buzzer, 2000) を連続出力する。
-    - state=0（無音）: noTone(buzzer) で停止する。
-    - いずれも delay() を使わず、次ループへ即時移行する。
+  ・LED点滅（500ms周期でON/OFF切替、待機中のみ）
+  ・ボタン監視（50ms周期で状態取得、チャタリング対策）
+  ・リモコン監視（100ms周期で入力取得）
+  ・曲再生（音長ごとに次の音へ遷移）
+  ・目覚まし監視（1s周期で時刻チェック）
 ```
 
 ---
@@ -332,12 +325,13 @@ const int measureInterval = 100; // 測定周期(ms)
 
 ```
 【処理の流れ】
-1.
-2.
-3.
+（例：音階に応じたLED点灯パターン）
+1. playTone()でtone値を受け取る
+2. tone値に応じてLED（赤・緑・青）を切り替え点灯
+3. tone再生終了後は全LED消灯
 
 【入力値と出力値の関係】
-
+tone=1 → 赤LED, tone=2 → 緑LED, tone=3 → 青LED
 ```
 
 ---
@@ -353,7 +347,9 @@ const int measureInterval = 100; // 測定周期(ms)
 | 1 | センサー値が正しく取れているか | `readSensor()` | `Serial.println(sensorValue);` |
 | 2 | 状態遷移が正しく起きているか | `loop()` | `Serial.println(currentState);` |
 | 3 | チャタリング処理が効いているか | `readButton()` | `Serial.println("btn confirmed");` |
-| 4 |  |  |  |
+| 4 | リモコン入力が正しく取得できているか | `readRemote()` | `Serial.println(remoteValue);` |
+| 5 | 曲データが正しく記録されているか | `recordSong()` | `Serial.println(songData[i]);` |
+| 6 | 目覚まし時刻が正しく監視されているか | `alarmControl()` | `Serial.println(alarmTime);` |
 
 ---
 
@@ -370,7 +366,8 @@ const int measureInterval = 100; // 測定周期(ms)
 | 2 | readButton() | スイッチを素早く2回押す | 1回分だけ true になる | | [ ] |
 | 3 | readSensor() | センサーを正常範囲で使う | 仕様範囲内の値が返る | | [ ] |
 | 4 | readSensor() | センサーを遮蔽・範囲外に向ける | 誤動作しない | | [ ] |
-| 5 | （自分の関数を追加） | | | | [ ] |
+| 5 | readRemote() | リモコンでボタンを押す | 受信値が正しく返る | | [ ] |
+| 6 | recordSong() | 曲作成モードで音階・長さを入力 | songData[]に正しく記録される | | [ ] |
 
 ### 5-2. 出力系テスト
 
@@ -378,7 +375,8 @@ const int measureInterval = 100; // 測定周期(ms)
 |:---|:---|:---|:---|:---|:---|
 | 1 | updateOutput(0) | state=0（待機中）を渡す | 緑LEDが点滅する | | [ ] |
 | 2 | updateOutput(1) | state=1（動作中）を渡す | 赤LEDが点灯、ブザーが鳴る | | [ ] |
-| 3 | （自分の状態・関数を追加） | | | | [ ] |
+| 3 | updateOutput(2) | state=2（曲作成中）を渡す | 青LEDが点灯、LCDに作成情報表示 | | [ ] |
+| 4 | updateOutput(4) | state=4（アラーム発動）を渡す | 全LED点灯、ブザー・モーターON | | [ ] |
 
 ### 5-3. タイミング・並行動作テスト
 
@@ -386,6 +384,7 @@ const int measureInterval = 100; // 測定周期(ms)
 |:---|:---|:---|:---|:---|:---|
 | 1 | delay()による処理停止がないか | LED点滅中にボタンを押す | ボタン入力が無視されない | | [ ] |
 | 2 | millis()タイマーの周期精度 | 点滅をストップウォッチで確認 | 設計した周期（例:500ms）通りに点滅 | | [ ] |
+| 3 | 曲再生中に他の入力が反応するか | 曲再生中にボタンやリモコンを操作 | 並行して入力が反応する | | [ ] |
 
 ---
 
