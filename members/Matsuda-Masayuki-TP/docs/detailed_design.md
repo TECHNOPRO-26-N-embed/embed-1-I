@@ -1,6 +1,6 @@
 # 詳細設計書 — 組込み開発実習
 
-<!-- 作成者: あなたの名前 / 日付: YYYY-MM-DD / グループ: 〇-〇 -->
+<!-- 作成者: 松田 眞幸/ 日付: 2026-05-22 / グループ: 1-i -->
 
 > **このドキュメントの目的**
 > 基本設計書（basic_design.md）で「**どのような構造で作るか**」を決めました。
@@ -19,10 +19,10 @@
 
 | 項目 | basic_design.md から転記 |
 |:--|:--|
-| 作品タイトル | |
-| 状態の種類（1-2 状態遷移から） | |
-| 実装する関数の数（2-2 関数一覧から） | 　個 |
-| グローバル変数の合計バイト数（2-1 SRAM確認から） | 　B |
+| 作品タイトル | アプローチアラート |
+| 状態の種類（1-2 状態遷移から） | 9種類 |
+| 実装する関数の数（2-2 関数一覧から） | 11個 |
+| グローバル変数の合計バイト数（2-1 SRAM確認から） | 20B |
 
 ---
 
@@ -32,25 +32,25 @@
 > ここで設計した変数は、この後の関数設計でそのまま使います。
 
 ```
-【ピン定義】（basic_design.md 3-1 から転記）
-  PIN_BUTTON    = 2    // タクトスイッチ（INPUT_PULLUP）
-  PIN_LED_RED   = 9    // 赤LED
-  PIN_LED_GREEN = 10   // 緑LED
-  PIN_BUZZER    = 11   // パッシブブザー
+const int trigPin = 9;
+const int echoPin = 10;
+const int buzzer = 3;
 
-【状態管理】（basic_design.md 1-2 の状態名から転記）
-  currentState  : int = 0   // 0:待機 1:動作中 2:完了 3:エラー
+// 距離関連
+long duration;
+int distance;
 
-【タイマー（millis()用）】（basic_design.md 2-3 から転記）
-  lastMillis_LED    : unsigned long = 0
-  lastMillis_Sensor : unsigned long = 0
+// 状態管理
+int state = 0; 
+// 0:無音 1:弱 2:中 3:強
 
-【センサー・入力値】（basic_design.md 2-1 から転記）
-  sensorValue   : int  = 0
-  buttonState   : bool = false
+// millis制御
+unsigned long prevMeasureTime = 0;
+unsigned long prevBeepTime = 0;
+bool beepState = false;
 
-【その他のフラグ・カウンター】
-  （自分のものを追加）
+// 設定値
+const int measureInterval = 100; // 測定周期(ms)
 ```
 
 ---
@@ -83,9 +83,12 @@
 **↓ 自分の setup() を設計してください**
 ```
 【処理の流れ】
-1.
-2.
-3.
+1.ピンモードを設定する
+  trigPin > OUTPUT
+  echoPin > INPUT
+  buzzer  > OUTPUT
+
+2. Serial.begin(9600) (デバック用)
 ```
 
 ---
@@ -122,15 +125,34 @@
 【処理の流れ】
 
 ＜毎ループ実行すること＞
+- 現在時刻を取得する: currentMillis = millis()
+- 距離測定の周期条件を確認する
+  - 条件: currentMillis - prevMeasureTime >= measureInterval
+  - 条件を満たしたら以下を実行
+    1. prevMeasureTime を currentMillis で更新
+    2. measureDistance() を呼び、distance を更新
+    3. judgeState(distance) を呼び、state を更新
+       - state=0: 無音
+       - state=1: 弱警告
+       - state=2: 中警告
+       - state=3: 強警告
+    4. シリアルに距離を出力する
+  - 条件を満たさない場合は距離測定をスキップし、前回の state を維持
+- controlBuzzer(currentMillis) を毎ループ呼び出して音を更新する
 
+＜state が 0（無音）のとき＞
+- noTone() でブザー停止
 
-＜currentState が 　　 のとき＞
+＜state が 1（弱警告）のとき＞
+- 周波数1000Hz、周期1000msの断続音
+- currentMillis - prevBeepTime >= 500ms でON/OFFを切替
 
+＜state が 2（中警告）のとき＞
+- 周波数1500Hz、周期400msの断続音
+- currentMillis - prevBeepTime >= 200ms でON/OFFを切替
 
-＜currentState が 　　 のとき＞
-
-
-＜currentState が 　　 のとき＞
+＜state が 3（強警告）のとき＞
+- tone(2000Hz) を連続出力
 
 ```
 
@@ -142,22 +164,105 @@
 
 ---
 
-### `関数名()` — （役割を1行で書く）
+### `setup()` — ピン設定とシリアル初期化を行う
 
-**basic_design.md 2-2 との対応：** （基本設計書の関数一覧の説明を転記）
+**basic_design.md 2-2 との対応：** 初期化（setup()）
 
-**引数：** `引数名`（型）: 何の値か
+**引数：** なし
 
-**戻り値：** 型（なしの場合は void）
+**戻り値：** なし（void）
 
 ```
 【処理の流れ】
-1.
-2.
-3.
+1. trigPin を OUTPUT、echoPin を INPUT、buzzer を OUTPUT に設定する。
+2. Serial.begin(9600) でシリアル通信を初期化する。
 
 【エラー・異常ケース】
-- 異常な値が来た場合:
+- ピン番号設定ミス: 配線と設計値を照合して修正する。
+```
+
+---
+
+### `loop()` — 周期測定と状態別ブザー制御を繰り返す
+
+**basic_design.md 2-2 との対応：** （共通）メイン制御（loop()）
+
+**引数：** なし
+
+**戻り値：** なし（void）
+
+```
+【処理の流れ】
+1. currentMillis = millis() を取得する。
+2. measureInterval(100ms) 経過時のみ measureDistance() と judgeState() を実行し、distance/state を更新する。
+3. Serial.print/println で距離を出力する。
+4. controlBuzzer(currentMillis) を毎ループ呼び、state に応じた音を出す。
+
+【エラー・異常ケース】
+- 測定値が不正（0や過大）: judgeState 前に異常判定を入れ、警告状態へ遷移する。
+```
+
+---
+
+### `measureDistance()` — 超音波センサで距離(cm)を取得する
+
+**basic_design.md 2-2 との対応：** 距離測定（measureDistance()）/ 距離計算（calculateDistance()）
+
+**引数：** なし
+
+**戻り値：** int: 測定距離（cm）
+
+```
+【処理の流れ】
+1. Trig を LOW(2us)→HIGH(10us)→LOW の順で出力し、超音波を発信する。
+2. pulseIn(echoPin, HIGH) でエコー継続時間 duration を取得する。
+3. dist = duration * 0.034 / 2 で距離(cm)へ変換して返す。
+
+【エラー・異常ケース】
+- pulseIn が0を返す: タイムアウト/未接続の可能性として異常扱いにする。
+- 距離が有効範囲外: 異常値として警告処理へ回す。
+```
+
+---
+
+### `judgeState(int d)` — 距離に応じて警告状態を判定する
+
+**basic_design.md 2-2 との対応：** 状態判定（judgeState()）
+
+**引数：** `d`（int）: 判定対象の距離(cm)
+
+**戻り値：** int: 状態値（0:無音 / 1:弱 / 2:中 / 3:強）
+
+```
+【処理の流れ】
+1. d > 100 なら state=0（無音）を返す。
+2. 50 < d <= 100 なら state=1（弱警告）を返す。
+3. 20 < d <= 50 なら state=2（中警告）を返す。
+4. d <= 20 なら state=3（強警告）を返す。
+
+【エラー・異常ケース】
+- d が0や負値: 異常値として扱う判定分岐を別途追加する。
+```
+
+---
+
+### `controlBuzzer(unsigned long currentMillis)` — 状態に応じてブザー音を制御する
+
+**basic_design.md 2-2 との対応：** ブザー制御（controlBuzzer()）/ 音出力（playTone()相当）
+
+**引数：** `currentMillis`（unsigned long）: 現在時刻(ms)
+
+**戻り値：** なし（void）
+
+```
+【処理の流れ】
+1. state=0 のとき noTone() で停止して終了する。
+2. state=1 は interval=1000ms/freq=1000Hz、state=2 は interval=400ms/freq=1500Hz を設定する。
+3. state=3 は tone(2000) を連続出力して終了する。
+4. state=1/2 では currentMillis - prevBeepTime >= interval/2 ごとに beepState を反転し、tone/noTone を切替える。
+
+【エラー・異常ケース】
+- state が想定外の値: 安全のため noTone() を実行して終了する。
 ```
 
 ---
@@ -199,7 +304,23 @@
   4. 条件を満たさない場合: 何もしない（次のループで再チェック）
 
 【自分のシステムで millis() を使う処理】
-  （basic_design.md 2-3 のタイミング設計から転記して具体化する）
+  1. 距離測定周期の管理（100ms）
+    - currentMillis = millis() を取得する。
+    - currentMillis - prevMeasureTime >= measureInterval(100) を満たした場合のみ測定する。
+    - 測定実行後、prevMeasureTime = currentMillis に更新する。
+    - これにより、距離測定は100msごとに実行され、他処理を停止させない。
+
+  2. 弱/中警告の断続音管理（non-blocking）
+    - state=1（弱）: interval=1000ms, freq=1000Hz
+    - state=2（中）: interval=400ms, freq=1500Hz
+    - currentMillis - prevBeepTime >= interval/2 を満たしたら beepState を反転する。
+    - beepState=true のとき tone(buzzer, freq)、false のとき noTone(buzzer) を実行する。
+    - 切替実行後、prevBeepTime = currentMillis に更新する。
+
+  3. 強警告/無音の管理
+    - state=3（強）: tone(buzzer, 2000) を連続出力する。
+    - state=0（無音）: noTone(buzzer) で停止する。
+    - いずれも delay() を使わず、次ループへ即時移行する。
 ```
 
 ---
