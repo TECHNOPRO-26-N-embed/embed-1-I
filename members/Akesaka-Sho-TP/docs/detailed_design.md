@@ -19,31 +19,53 @@
 
 | 項目 | basic_design.md から転記 |
 |:--|:--|
-| 状態の種類（1-2 状態遷移から） | 待機中／音再生中／曲作成中／目覚まし待機／アラーム発動 |
+| 作品タイトル | Tone LED |
+| 状態の種類（1-2 状態遷移から） | 0:待機, 1:再生中, 2:完了, 3:エラー |
+| 実装する関数の数（2-2 関数一覧から） | 7個 |
+| グローバル変数の合計バイト数（2-1 SRAM確認から） | 32B |
+
+---
+
 ## 1. グローバル変数・定数の設計
 
 > ※ 基本設計書（2-1 データ設計）をもとに、**型と初期値まで**決めます。
+> ここで設計した変数は、この後の関数設計でそのまま使います。
 
 ```
-  PIN_SEG3        = 5    // セグメント3
-  PIN_MOTOR       = 7    // モーター
-  PIN_LED_RED     = 9    // LED（赤）
-  PIN_LED_GREEN   = 10   // LED（緑）
-  PIN_LED_BLUE    = 11   // LED（青）
-  LCD_SDA         = A4   // LCD（I2C）SDA
+【ピン定義】
+  PIN_BUTTON    = 2    // タクトスイッチ（INPUT_PULLUP）
+  PIN_LED_RED   = 9    // 赤LED
+  PIN_LED_BLUE  = 10   // 青LED
+  PIN_LED_GREEN = 11   // 緑LED
+  PIN_LED_YELLOW= 12   // 黄LED
+  PIN_BUZZER    = 3    // パッシブブザー
+  PIN_LCD_RS    = 4    // LCD RS
+  PIN_LCD_E     = 5    // LCD E
+  PIN_LCD_D4    = 6    // LCD D4
+  PIN_LCD_D5    = 7    // LCD D5
+  PIN_LCD_D6    = 8    // LCD D6
+  PIN_LCD_D7    = A2   // LCD D7
 
-  lastMillis_LED      : unsigned long = 0
+【状態管理】
+  currentState  : int = 0   // 0:待機 1:再生中 2:完了 3:エラー
 
-  remoteValue     : int  = 0
-  micValue        : int  = 0
-  buttonFlag      : bool = false
+【タイマー（millis()用）】
+  lastMillis_Note : unsigned long = 0
+  noteInterval    : unsigned int = 0
 
-【その他のフラグ・カウンター】
-  selectedTone    : int  = 0
-  alarmTime       : int  = 0
-  isAlarmActive   : bool = false
-  songData[]      : int配列 = {0}
-  songLength      : int  = 0
+【曲データ・再生管理】
+  songIndex     : int = 0         // 曲リストのインデックス
+  noteIndex     : int = 0         // 曲中の音階インデックス
+  songList      : 配列            // 曲名リスト
+  currentSong   : 構造体/配列     // 再生中の曲データ
+
+【LCD表示】
+  lcd           : LiquidCrystal   // LCDオブジェクト
+
+【ボタン・入力】
+  buttonState   : bool = false
+  lastDebounceTime : unsigned long = 0
+  DEBOUNCE_DELAY   : const int = 50
 ```
 
 ---
@@ -76,15 +98,15 @@
 **↓ 自分の setup() を設計してください**
 ```
 【処理の流れ】
-1. 各ピンのモードを設定する
-  - PIN_REMOTE, PIN_BUTTON → INPUT_PULLUP
-  - PIN_LED_RED, PIN_LED_GREEN, PIN_LED_BLUE → OUTPUT
-  - PIN_BUZZER, PIN_MOTOR, PIN_SEG1〜4 → OUTPUT
-2. LCD/I2C等のライブラリ初期化
-  - lcd.begin(16, 2) など
-3. Serial.begin(9600) でデバッグ出力有効化
-4. 起動確認として緑LEDを1秒点灯し消灯
-5. 変数・フラグ類を初期化（currentState=0, 各種タイマー=0, etc）
+1. 各ピンのモードを設定
+  - ボタン: INPUT_PULLUP
+  - 赤・青・緑・黄LED: OUTPUT
+  - ブザー: OUTPUT
+  - LCD: ピン指定して初期化
+2. LCDを初期化し、ウェルカムメッセージを表示
+3. 曲リスト・曲データを初期化
+4. Serial.begin(9600)でデバッグ出力有効化
+5. 緑LEDを1秒点灯して起動確認
 ```
 
 ---
@@ -121,31 +143,29 @@
 【処理の流れ】
 
 ＜毎ループ実行すること＞
-  - readButton(), readRemote(), readSensor() で入力取得
-  - now = millis() で現在時刻取得
-  - updateOutput(currentState) で出力更新
+  - ボタン入力をreadButton()で取得
+  - 現在時刻を取得: now = millis()
+  - LCD表示は必要に応じてupdateLCD()で更新
 
 ＜currentState が 0（待機中）のとき＞
-  - LCDに待機メッセージ表示
-  - リモコン操作で音選択→ currentState=1
-  - 曲作成モード選択→ currentState=2
-  - 目覚ましモード選択→ currentState=3
+  - ボタンが押されたら再生開始（currentState = 1）
+  - LCDに「待機中」または選択中の曲名を表示
 
-＜currentState が 1（音再生中）のとき＞
-  - playTone(selectedTone)で音再生・LED点灯
-  - 停止コマンドまたは曲終了→ currentState=0
+＜currentState が 1（再生中）のとき＞
+  - 曲データから音階・長さを取得
+  - playNote()で音を鳴らし、対応する色（赤・青・緑・黄）のLEDを点灯
+  - LCDに曲名を表示
+  - noteInterval経過後、次の音へ進む
+  - 曲が終わったらcurrentState = 2
 
-＜currentState が 2（曲作成中）のとき＞
-  - recordSong()で入力音階・長さを記録
-  - 保存/終了で currentState=0
+＜currentState が 2（完了）のとき＞
+  - LCDに「再生完了」表示
+  - 全LED消灯、ブザー停止
+  - ボタンが押されたらcurrentState = 0
 
-＜currentState が 3（目覚まし待機）のとき＞
-  - LCDに時刻表示、alarmControl()で時刻監視
-  - アラーム時刻到達→ currentState=4
-
-＜currentState が 4（アラーム発動）のとき＞
-  - ブザー・LED・モーター動作
-  - 停止コマンドで currentState=0
+＜currentState が 3（エラー）のとき＞
+  - LCDにエラー内容を表示
+  - リセット待ち
 ```
 
 ---
@@ -156,118 +176,71 @@
 
 ---
 
-### `readButton()` — チャタリング処理済みのボタン状態を返す
+### `readButton()` — ボタン入力の取得（デバウンス処理付き）
 **basic_design.md 2-2 との対応：** ボタン入力を安定して取得する
 **引数：** なし
-**戻り値：** bool
+**戻り値：** bool（押されたらtrue）
 ```
 【処理の流れ】
-1. ボタンのデジタル値を読む
+1. ボタンの状態をdigitalReadで取得
 2. 前回確定時刻からの経過時間を計算
-3. 50ms未満なら無視、50ms以上なら状態を確定
-4. 状態が変化した場合のみtrueを返す
+3. DEBOUNCE_DELAY以上なら状態を確定
+4. 押下を検出したらtrueを返す
 
 【エラー・異常ケース】
-- ボタン配線断線時は常にHIGHとなるため、異常検知可能
+- 異常なノイズは無視
 ```
 
-### `readRemote()` — リモコンの入力値を取得
-**basic_design.md 2-2 との対応：** リモコン受信値を取得し、コマンド判定に使う
-**引数：** なし
-**戻り値：** int（受信コード）
-```
-【処理の流れ】
-1. IRremoteライブラリ等で受信データを取得
-2. 有効なデータがあればremoteValueに格納
-3. 受信がなければ前回値または0を返す
-
-【エラー・異常ケース】
-- 受信エラー時は0またはエラーコードを返す
-```
-
-### `readSensor()` — センサー値を取得して更新
-**basic_design.md 2-2 との対応：** センサー値を取得し、範囲外は無視
-**引数：** なし
-**戻り値：** int（センサー値）
-```
-【処理の流れ】
-1. analogReadやdigitalReadで値を取得
-2. 仕様範囲外（例:0や400cm超）は無視し、前回値を保持
-3. 有効値ならsensorValueを更新
-
-【エラー・異常ケース】
-- センサー断線・異常値は無視し、前回値を返す
-```
-
-### `updateOutput(state)` — 現在のstateに応じてLED/ブザー制御
-**basic_design.md 2-2 との対応：** 状態に応じて出力を切り替える
-**引数：** state（int）: 現在の状態
+### `playNote()` — 指定した音階を鳴らし、LEDを点灯
+**basic_design.md 2-2 との対応：** 曲データの音階を再生
+**引数：** note（int/enum）: 鳴らす音階, duration（int）: 鳴らす長さms
 **戻り値：** void
 ```
 【処理の流れ】
-1. state=0: 緑LED点滅、他消灯
-2. state=1: 赤LED点灯、ブザーON
-3. state=2: 青LED点灯、LCDに作成情報表示
-4. state=3: LCDに時刻表示、LED消灯
-5. state=4: 全LED点灯、ブザー・モーターON
+1. tone()でブザーに周波数出力
+2. 音階に対応するLED（赤・青・緑・黄）を点灯
+3. duration経過後、LED消灯・ブザー停止
 
 【エラー・異常ケース】
-- 出力ピン断線時はエラー表示
+- 不正な音階は無音・全LED消灯
 ```
 
-### `playTone(tone)` — 選択した音を再生
-**basic_design.md 2-2 との対応：** ブザーで音を鳴らし、LEDを点灯
-**引数：** tone（int）: 再生する音階番号
-**戻り値：** void
-```
-【処理の流れ】
-1. tone()関数等で指定音を再生
-2. 音階に応じてLEDを点灯
-3. 再生終了後はLED消灯
-
-【エラー・異常ケース】
-- 不正なtone値は無視
-```
-
-### `recordSong()` — 入力に応じて曲データを記録
-**basic_design.md 2-2 との対応：** リモコンや入力で音階・長さを記録
+### `selectSong()` — 曲の選択
+**basic_design.md 2-2 との対応：** 曲リストから再生曲を選択
 **引数：** なし
 **戻り値：** void
 ```
 【処理の流れ】
-1. 入力値（音階・長さ）を受け付けsongData[]に格納
-2. 入力終了または保存コマンドで記録完了
-3. LCDに作成情報を表示
+1. ボタン長押し等で曲リストを巡回
+2. LCDに曲名を表示
+3. 決定時にcurrentSongへセット
 
 【エラー・異常ケース】
-- 配列長超過や不正値は無視
+- 曲データが不正ならエラー表示
 ```
 
-### `alarmControl()` — 目覚まし時刻の監視・発動
-**basic_design.md 2-2 との対応：** 目覚まし時刻の監視とアラーム発動
+### `updateLCD()` — LCD表示の更新
+**basic_design.md 2-2 との対応：** 状態や曲名をLCDに表示
 **引数：** なし
 **戻り値：** void
 ```
 【処理の流れ】
-1. 現在時刻とalarmTimeを比較
-2. 一致したらcurrentState=4（アラーム発動）
-3. LCDに時刻や状態を表示
+1. 状態に応じてLCDの内容を切り替え
+2. 曲名・再生状況・エラー等を表示
 
 【エラー・異常ケース】
-- 不正な時刻設定は無視
+- LCD通信エラー時は再初期化
 ```
 
-### `controlMotor()` — 曲再生時にモーターを回す
-**basic_design.md 2-2 との対応：** 曲再生中のみモーターON/OFF
+### `stopAll()` — 全出力の停止
+**basic_design.md 2-2 との対応：** LED・ブザー・LCDのリセット
 **引数：** なし
 **戻り値：** void
 ```
 【処理の流れ】
-1. currentState=1または4のときモーターON
-2. それ以外はOFF
-
-【エラー・異常ケース】
-- モーター配線断線時はエラー表示
+1. 全LED消灯
+2. ブザー停止
+3. LCDクリア
 ```
 
 ---
@@ -300,38 +273,34 @@
 
 ```
 【考え方】
-  「前回実行した時刻」を記録しておき、「今の時刻 − 前回時刻 ≥ 周期」なら実行する。
+  「前回実行した時刻」を記録しておき、「今の時刻 − 前回時刻 ≥ 音階の長さ」なら次の音へ進む。
 
-【処理の流れ（例: LED点滅）】
+【処理の流れ（例: 曲再生）】
   1. now = millis()
-  2. now - lastMillis_LED >= LED_INTERVAL かどうか確認
-  3. 条件を満たした場合: LEDのON/OFFを切り替え、lastMillis_LED = now
+  2. now - lastMillis_Note >= noteInterval かどうか確認
+  3. 条件を満たした場合: 次の音階データを取得し、playNote()を呼ぶ。lastMillis_Note = now
   4. 条件を満たさない場合: 何もしない（次のループで再チェック）
 
 【自分のシステムで millis() を使う処理】
-  ・LED点滅（500ms周期でON/OFF切替、待機中のみ）
-  ・ボタン監視（50ms周期で状態取得、チャタリング対策）
-  ・リモコン監視（100ms周期で入力取得）
-  ・曲再生（音長ごとに次の音へ遷移）
-  ・目覚まし監視（1s周期で時刻チェック）
+  - 曲再生時の音階切り替えタイミング
+  - LED点灯の消灯タイミング
+  - ボタンのデバウンス
 ```
 
 ---
 
 ### 3-3. その他の重要ロジック（任意）
 
-> **【任意】** 複雑なロジックがある場合のみ記入してください。
-> 例：「距離に応じたLED点灯パターン」「ゲームの衝突判定」「温度の閾値判定」
-
 ```
 【処理の流れ】
-（例：音階に応じたLED点灯パターン）
-1. playTone()でtone値を受け取る
-2. tone値に応じてLED（赤・緑・青）を切り替え点灯
-3. tone再生終了後は全LED消灯
+1. 曲データ（音階と長さの配列）を順に参照
+2. 音階ごとに対応するLED（赤・青・緑・黄）を点灯し、tone()でブザーを鳴らす
+3. LCDに現在再生中の曲名・音階を表示
+4. 曲が終了したら全LED消灯・ブザー停止・LCDに「再生完了」表示
 
 【入力値と出力値の関係】
-tone=1 → 赤LED, tone=2 → 緑LED, tone=3 → 青LED
+入力：曲データ（音階・長さ）
+出力：該当LED点灯、ブザー音、LCD表示
 ```
 
 ---
@@ -347,9 +316,9 @@ tone=1 → 赤LED, tone=2 → 緑LED, tone=3 → 青LED
 | 1 | センサー値が正しく取れているか | `readSensor()` | `Serial.println(sensorValue);` |
 | 2 | 状態遷移が正しく起きているか | `loop()` | `Serial.println(currentState);` |
 | 3 | チャタリング処理が効いているか | `readButton()` | `Serial.println("btn confirmed");` |
-| 4 | リモコン入力が正しく取得できているか | `readRemote()` | `Serial.println(remoteValue);` |
-| 5 | 曲データが正しく記録されているか | `recordSong()` | `Serial.println(songData[i]);` |
-| 6 | 目覚まし時刻が正しく監視されているか | `alarmControl()` | `Serial.println(alarmTime);` |
+| 4 | 曲再生中の音階・タイミング | `playNote()` | `Serial.println(noteIndex);` |
+| 5 | LED・ブザー出力のON/OFF | `playNote(), stopAll()` | `Serial.println("LED(赤青緑黄)/BUZZER ON/OFF");` |
+| 6 | LCD表示内容 | `updateLCD()` | `Serial.println("LCD:" + 表示内容);` |
 
 ---
 
@@ -366,8 +335,8 @@ tone=1 → 赤LED, tone=2 → 緑LED, tone=3 → 青LED
 | 2 | readButton() | スイッチを素早く2回押す | 1回分だけ true になる | | [ ] |
 | 3 | readSensor() | センサーを正常範囲で使う | 仕様範囲内の値が返る | | [ ] |
 | 4 | readSensor() | センサーを遮蔽・範囲外に向ける | 誤動作しない | | [ ] |
-| 5 | readRemote() | リモコンでボタンを押す | 受信値が正しく返る | | [ ] |
-| 6 | recordSong() | 曲作成モードで音階・長さを入力 | songData[]に正しく記録される | | [ ] |
+| 5 | selectSong() | ボタン長押しで曲を切り替え | 曲名が順に表示される | | [ ] |
+| 6 | updateLCD() | 状態ごとにLCD表示を確認 | 状態・曲名・エラーが正しく表示される | | [ ] |
 
 ### 5-2. 出力系テスト
 
@@ -375,16 +344,17 @@ tone=1 → 赤LED, tone=2 → 緑LED, tone=3 → 青LED
 |:---|:---|:---|:---|:---|:---|
 | 1 | updateOutput(0) | state=0（待機中）を渡す | 緑LEDが点滅する | | [ ] |
 | 2 | updateOutput(1) | state=1（動作中）を渡す | 赤LEDが点灯、ブザーが鳴る | | [ ] |
-| 3 | updateOutput(2) | state=2（曲作成中）を渡す | 青LEDが点灯、LCDに作成情報表示 | | [ ] |
-| 4 | updateOutput(4) | state=4（アラーム発動）を渡す | 全LED点灯、ブザー・モーターON | | [ ] |
+| 3 | playNote() | 曲データの音階・長さを渡す | 対応するLED（赤・青・緑・黄）が点灯し、ブザーが鳴る | | [ ] |
+| 4 | stopAll() | 再生完了後に呼ぶ | 全LED消灯・ブザー停止・LCDクリア | | [ ] |
 
 ### 5-3. タイミング・並行動作テスト
 
 | No | テスト内容 | テスト手順 | 期待する結果 | 実際の結果 | 合否 |
 |:---|:---|:---|:---|:---|:---|
 | 1 | delay()による処理停止がないか | LED点滅中にボタンを押す | ボタン入力が無視されない | | [ ] |
-| 2 | millis()タイマーの周期精度 | 点滅をストップウォッチで確認 | 設計した周期（例:500ms）通りに点滅 | | [ ] |
-| 3 | 曲再生中に他の入力が反応するか | 曲再生中にボタンやリモコンを操作 | 並行して入力が反応する | | [ ] |
+| 2 | millis()タイマーの周期精度 | 曲再生中に音階切り替えタイミングを計測 | 設計した音長通りに切り替わる | | [ ] |
+| 3 | LCD・LED・ブザーの並行動作 | 曲再生中にLCD/LED/ブザーの表示・出力を観察 | すべて正しく連動して動作 | | [ ] |
+| 4 | エラー発生時の動作 | 不正な曲データやLCD通信エラーを発生させる | エラー表示・安全に停止 | | [ ] |
 
 ---
 
@@ -396,9 +366,17 @@ tone=1 → 赤LED, tone=2 → 緑LED, tone=3 → 青LED
 
 > 「この詳細設計書に書いた関数と処理フローをもとに Arduino でコードを書きます。バグになりやすい箇所・処理の抜け・型の問題はありますか？」
 
+
 **AIの回答（要約）：**
+- ボタンのチャタリング対策や、曲データの範囲外アクセス、LCD通信エラーなどに注意が必要。
+- LEDやブザーの消灯忘れ、状態遷移の抜け、音階とLEDの対応ミスがバグになりやすい。
+- millis()によるタイミング管理はdelay()と混在しないようにする。
 
 **対応した内容：**
+- チャタリング防止ロジックをreadButton()に実装。
+- 曲データの範囲外アクセス時はエラー状態へ遷移。
+- LCD通信エラー時は再初期化処理を追加。
+- 状態遷移・出力OFF処理を明確化。
 
 ---
 
@@ -406,9 +384,16 @@ tone=1 → 赤LED, tone=2 → 緑LED, tone=3 → 青LED
 
 > 「Section 5 の単体テスト仕様書で、各関数の動作が正しく検証できていますか？テストが不足している項目や、境界値テストが必要な箇所を教えてください。」
 
+
 **AIの回答（要約）：**
+- 主要な関数（ボタン、曲再生、LCD、LED/ブザー）のテストは網羅されている。
+- 曲データの境界値（最初・最後）、エラー時の動作、LCD表示内容の確認テストが重要。
+- タイミング精度や並行動作のテストも必要。
 
 **対応した内容：**
+- 曲データの先頭・末尾、異常値入力時のテスト項目を追加。
+- LCD表示やエラー時の動作確認テストを追加。
+- タイミング・並行動作テストを充実させた。
 
 ---
 

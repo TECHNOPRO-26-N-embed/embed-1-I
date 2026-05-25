@@ -262,7 +262,7 @@ const int measureInterval = 100; // 測定周期(ms)
 4. state=1/2 では currentMillis - prevBeepTime >= interval/2 ごとに beepState を反転し、tone/noTone を切替える。
 
 【エラー・異常ケース】
-- state が想定外の値: 安全のため noTone() を実行して終了する。
+- state が想定外の値: 安全のため 強警告 を実行して終了する。
 ```
 
 ---
@@ -350,10 +350,12 @@ const int measureInterval = 100; // 測定周期(ms)
 
 | No | 確認したい内容 | 挿入する関数 | Serial.println の内容例 |
 |:---|:---|:---|:---|
-| 1 | センサー値が正しく取れているか | `readSensor()` | `Serial.println(sensorValue);` |
-| 2 | 状態遷移が正しく起きているか | `loop()` | `Serial.println(currentState);` |
-| 3 | チャタリング処理が効いているか | `readButton()` | `Serial.println("btn confirmed");` |
-| 4 |  |  |  |
+| 1 | 距離測定値が正しく取得できるか（T2/T3） | `loop()` | `Serial.println(distance);` |
+| 2 | 状態判定がしきい値どおりか（T4/T15） | `loop()` | `Serial.println(state);` |
+| 3 | 断続音の切替周期が正しいか（T6） | `controlBuzzer()` | `Serial.println(beepState);` |
+| 4 | 測定周期が約100msか（T8） | `loop()` | `Serial.println(currentMillis - prevMeasureTime);` |
+| 5 | 異常値・タイムアウト時に警告遷移するか（T11/T12/T13） | `measureDistance()` / `loop()` | `Serial.println("WARN: sensor abnormal");` |
+| 6 | 応答時間0.5秒以内を満たすか（T14） | `loop()` | `Serial.println(currentMillis);` |
 
 ---
 
@@ -366,26 +368,41 @@ const int measureInterval = 100; // 測定周期(ms)
 
 | No | テスト対象の関数 | 入力・操作 | 期待する結果 | 実際の結果 | 合否 |
 |:---|:---|:---|:---|:---|:---|
-| 1 | readButton() | タクトスイッチを1回押す | true が返る | | [ ] |
-| 2 | readButton() | スイッチを素早く2回押す | 1回分だけ true になる | | [ ] |
-| 3 | readSensor() | センサーを正常範囲で使う | 仕様範囲内の値が返る | | [ ] |
-| 4 | readSensor() | センサーを遮蔽・範囲外に向ける | 誤動作しない | | [ ] |
-| 5 | （自分の関数を追加） | | | | [ ] |
+| 1 | measureDistance() | 既知距離（30cm）に物体を置く | 近い値（±数cm）が返る | | [ ] |
+| 2 | measureDistance() | pulseInが0を返す場合 | 異常値として警告状態へ遷移 | | [ ] |
+| 3 | measureDistance() | 距離が負値や極端な値の場合 | 異常値として警告状態へ遷移 | | [ ] |
+| 4 | judgeState() | d=120 を入力 | state=0（無音）が返る | | [ ] |
+| 5 | judgeState() | d=100 を入力 | state=1（弱警告）が返る（境界値） | | [ ] |
+| 6 | judgeState() | d=70 / d=30 / d=10 を入力 | state=1 / 2 / 3 が返る | | [ ] |
+| 7 | judgeState() | d=50 を入力 | state=2（中警告）が返る（境界値） | | [ ] |
+| 8 | judgeState() | d=20 を入力 | state=3（強警告）が返る（境界値） | | [ ] |
+| 9 | loop()（currentMillis判定） | currentMillis - prevMeasureTime < 100 の状態で1ループ実行 | 距離測定を実行せず、stateを維持 | | [ ] |
+|10 | loop()（currentMillis判定） | currentMillis - prevMeasureTime >= 100 の状態で1ループ実行 | measureDistance() が1回実行される | | [ ] |
 
 ### 5-2. 出力系テスト
 
 | No | テスト対象の関数 | 入力・操作 | 期待する結果 | 実際の結果 | 合否 |
 |:---|:---|:---|:---|:---|:---|
-| 1 | updateOutput(0) | state=0（待機中）を渡す | 緑LEDが点滅する | | [ ] |
-| 2 | updateOutput(1) | state=1（動作中）を渡す | 赤LEDが点灯、ブザーが鳴る | | [ ] |
-| 3 | （自分の状態・関数を追加） | | | | [ ] |
+| 1 | controlBuzzer() | state=0, 任意のcurrentMillis | noTone() が呼ばれ無音になる | | [ ] |
+| 2 | controlBuzzer() | state=1, currentMillis - prevBeepTime < 500 | 音状態が切り替わらない | | [ ] |
+| 3 | controlBuzzer() | state=1, currentMillis - prevBeepTime = 499ms | 切替なし（境界値直前） | | [ ] |
+| 4 | controlBuzzer() | state=1, currentMillis - prevBeepTime = 500ms | beepState が反転し tone/noTone が切替（境界値） | | [ ] |
+| 5 | controlBuzzer() | state=2, currentMillis - prevBeepTime = 199ms | 切替なし（境界値直前） | | [ ] |
+| 6 | controlBuzzer() | state=2, currentMillis - prevBeepTime = 200ms | 1500Hz の断続音に切替（境界値） | | [ ] |
+| 7 | controlBuzzer() | state=3, 任意のcurrentMillis | 2000Hz の連続音が出る | | [ ] |
+| 8 | controlBuzzer() | state=-1, 任意のcurrentMillis | 強警告（2000Hz連続音）となる（想定外stateの安全動作） | | [ ] |
+| 9 | controlBuzzer() | state=4, 任意のcurrentMillis | 強警告（2000Hz連続音）となる（想定外stateの安全動作） | | [ ] |
+|10 | Serial出力 | 距離測定時 | Serial.println(distance) で距離が出力される | | [ ] |
 
 ### 5-3. タイミング・並行動作テスト
 
 | No | テスト内容 | テスト手順 | 期待する結果 | 実際の結果 | 合否 |
 |:---|:---|:---|:---|:---|:---|
-| 1 | delay()による処理停止がないか | LED点滅中にボタンを押す | ボタン入力が無視されない | | [ ] |
-| 2 | millis()タイマーの周期精度 | 点滅をストップウォッチで確認 | 設計した周期（例:500ms）通りに点滅 | | [ ] |
+| 1 | 測定周期100msの境界確認（入力系No.9/10） | currentMillis - prevMeasureTime を 99ms と 100ms に設定して loop() を実行 | 99msでは測定しない、100msで1回だけ測定する（境界値） | | [ ] |
+| 2 | 弱警告の切替境界確認（出力系No.3/4） | state=1 で currentMillis - prevBeepTime を 499ms と 500ms に設定して controlBuzzer() を実行 | 499msでは切替なし、500msでbeepStateが反転する（境界値） | | [ ] |
+| 3 | 中警告の切替境界確認（出力系No.5/6） | state=2 で currentMillis - prevBeepTime を 199ms と 200ms に設定して controlBuzzer() を実行 | 199msでは切替なし、200msで1500Hzの断続音へ切替（境界値） | | [ ] |
+| 4 | 並行動作確認（測定とブザー制御の独立性） | 連続ループ中に測定周期到達タイミングと断続音切替タイミングを重ねて実行 | 距離測定と音切替の両方が遅延なく実行される | | [ ] |
+| 5 | delay未使用確認（非ブロッキング動作） | 5秒連続実行し、シリアル出力の更新間隔と音切替間隔を観察 | 測定周期と音切替周期が継続し、処理停止が発生しない | | [ ] |
 
 ---
 
@@ -398,8 +415,28 @@ const int measureInterval = 100; // 測定周期(ms)
 > 「この詳細設計書に書いた関数と処理フローをもとに Arduino でコードを書きます。バグになりやすい箇所・処理の抜け・型の問題はありますか？」
 
 **AIの回答（要約）：**
+Section 5 の単体テスト仕様書は主要な関数の基本動作や状態遷移、タイミング制御を広くカバーしていますが、以下の点でテストが不足しています。
+
+【不足・追加が必要なテスト項目】
+1. measureDistance() の異常値・エラー処理（pulseInが0や負値、極端な値の場合の警告遷移）
+2. judgeState() のしきい値（d=100, 50, 20など）での境界値テスト
+3. controlBuzzer() の異常系（stateが想定外の値の場合の安全動作）
+4. チャタリング防止（デバウンス）のテスト（50ms未満/以上の連続入力）
+5. シリアル出力内容の検証（距離、state、警告メッセージ等）
+
+【境界値テストが必要な箇所】
+・ judgeState() のしきい値（d=100, 50, 20）
+・ controlBuzzer() の切替タイミング（500ms, 200ms など）
+・ measureDistance() の有効範囲の上下限
 
 **対応した内容：**
+・Section 5-1, 5-2, 5-3 に以下のテスト項目を追加・修正した：
+  - measureDistance() の異常値（0, 負値, 極端な値）入力時の警告遷移テスト
+  - judgeState() で d=100, 50, 20 の境界値入力時のstate判定テスト
+  - controlBuzzer() で stateが想定外の値（例: -1, 4）時の安全動作テスト
+  - デバウンス処理の50ms未満/以上の連続入力テスト（ボタン入力がある場合）
+  - Serial出力内容（距離、state、警告メッセージ等）の検証テスト
+・既存テスト項目の期待結果欄に、境界値や異常系の具体的な期待動作を明記した。
 
 ---
 
@@ -407,9 +444,25 @@ const int measureInterval = 100; // 測定周期(ms)
 
 > 「Section 5 の単体テスト仕様書で、各関数の動作が正しく検証できていますか？テストが不足している項目や、境界値テストが必要な箇所を教えてください。」
 
+
 **AIの回答（要約）：**
+Section 5 の単体テスト仕様書は主要な関数の基本動作や状態遷移、タイミング制御を広くカバーしていますが、以下の点でテストが不足しています。
+
+【不足・追加が必要なテスト項目】
+1. measureDistance() の異常値・エラー処理（pulseInが0や負値、極端な値の場合の警告遷移）
+2. judgeState() のしきい値（d=100, 50, 20など）での境界値テスト
+3. controlBuzzer() の異常系（stateが想定外の値の場合の安全動作）
+4. チャタリング防止（デバウンス）のテスト（50ms未満/以上の連続入力）
+5. シリアル出力内容の検証（距離、state、警告メッセージ等）
+
+【境界値テストが必要な箇所】
+- judgeState() のしきい値（d=100, 50, 20）
+- controlBuzzer() の切替タイミング（500ms, 200ms など）
+- measureDistance() の有効範囲の上下限
 
 **対応した内容：**
+・Section 5-1, 5-2, 5-3 に不足していたテスト項目（異常値・境界値・デバウンス・想定外state・シリアル出力）を追加・修正した。
+・既存テストの期待結果も、境界値や異常系の動作を具体的に記載した。
 
 ---
 
