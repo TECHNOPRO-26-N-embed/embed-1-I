@@ -104,7 +104,7 @@
 [確認待ち]
    ├─（確認ボタン押下）────────────→ [安全]
    └─（10秒経過）──────────────→ [警告中]
-                                      ↓（停止ボタン / 確認ボタン）      
+                                      ↓（ 確認ボタン）      
                                       ↓                               
                                     [安全]
 
@@ -171,17 +171,12 @@
 |:--|:--|:--|:--|:--|:--|:--|
 | — | 初期化 | `setup()` | ピン設定・初期状態の設定 | なし | なし | 起動時1回 |
 | — | メイン制御 | `loop()` | 状態に応じて各処理を呼び出す | なし | なし | 常時 |
-| — |（共通）距離取得 | `readDistance()` | 超音波センサーで距離を測定する | なし | int (cm) | loop()内 |
-| — |（共通）ボタン読取 | `readButtonConfirm()` | 確認ボタンの状態を取得（デバウンス後| なし | bool | loop()内 |
-| — |（共通）ボタン読取 | `readButtonStop()` | 停止ボタンの状態を取得 | なし | bool | loop()内 |
-| — |（共通）出力制御 | `updateOutput()` | 状態に応じてLEDとブザーを制御する | state | なし | loop()内 |
-| F01 | 距離測定機能 | `measureDistance()` | 距離データを取得し更新する | なし | なし| loop()内 |
-| F02 | 離席検知機能 | `detectLeaving()` | distance > 100cm を検知する | distance | bool | loop()内 |
-| F03 | 確認待ち機能 | `waitForConfirm()` | 一定時間（10秒）待機しボタン入力を確認 | なし | bool | loop()内 |
-| F04 | 警告機能 | `activateAlert()` | LED点滅とブザー音で警告する | なし | なし | loop()内 |
-| F05 | 停止機能 | `stopAlert()` | 警告を停止して安全状態に戻す | なし | なし | loop()内 |
-| A01 | 距離変更機能 | `setThreshold()` | 追加機能①の処理を行う | なし | int | loop()内 |
-| A02 |LEDモード変更 | `changeLEDMode()` | LED点灯パターンを変更する | mode | なし | loop()内 |
+| — | 距離測定 | `readDistance()` | 超音波センサーで距離を測定する | なし | int (cm) | loop()内 |
+| F01 | 距離更新 | `measureDistance()` | 距離を更新（ノイズ対応） | now | なし| loop()内 |
+| F02 |ボタン入力 | `readButton()` | ボタン入力（デバウンス） | pin,now | bool | loop()内 |
+|  | 離席検知 | 'detectLeave()' | 距離が閾値を超えた状態が一定時間継続したか判定する | now | bool | loop()内 |
+|F03| 確認待ち機能| `waitForConfirm()` |一定時間（10秒）待機しボタン入力を確認 | now | int（0,1,2| loop()内 |
+| F04 | 警告機能 | `activateAlert()` | LED点滅とブザー音で警告する | now | なし | loop()内 |
 |  |  |  |  |  |  |  |
 
 > [!CAUTION]
