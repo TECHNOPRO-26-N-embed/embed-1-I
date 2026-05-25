@@ -33,24 +33,30 @@
 
 ```
 【ピン定義】（basic_design.md 3-1 から転記）
-  PIN_BUTTON    = 2    // タクトスイッチ（INPUT_PULLUP）
-  PIN_LED_RED   = 9    // 赤LED
-  PIN_LED_GREEN = 10   // 緑LED
-  PIN_BUZZER    = 11   // パッシブブザー
+  PIN_BUTTON    = 4    // タクトスイッチ（再生/停止, INPUT_PULLUP）
+  PIN_POT       = A0   // ポテンショメータ（曲切替）
+  PIN_LCD_SDA   = A4   // LCD1602 I2C SDA
+  PIN_LCD_SCL   = A5   // LCD1602 I2C SCL
+  PIN_BUZZER    = 3    // パッシブブザー
 
 【状態管理】（basic_design.md 1-2 の状態名から転記）
-  currentState  : int = 0   // 0:待機 1:動作中 2:完了 3:エラー
+  currentState  : byte = 0  // 0:待機中 1:計測中 2:操作実行（停止/再生・前曲/次曲）
+  isPlaying     : bool = true // true:再生中 false:停止中
 
 【タイマー（millis()用）】（basic_design.md 2-3 から転記）
-  lastMillis_LED    : unsigned long = 0
-  lastMillis_Sensor : unsigned long = 0
+  lastMillis_Pot    : unsigned long = 100  // ポテンショメータ監視（100ms）
+  lastMillis_Buzzer : unsigned long = 20  // ブザー音符更新（20ms）
+  lastMillis_Button : unsigned long = 10  // ボタン監視（10ms）
+  lastMillis_LCD    : unsigned long = 250  // LCD表示更新（250ms）
 
 【センサー・入力値】（basic_design.md 2-1 から転記）
-  sensorValue   : int  = 0
-  buttonState   : bool = false
+  lastInputMillis  : unsigned long = 0  // ボタン入力の最終確定時刻（デバウンス用）
+  currentSongIndex : int = 0            // 現在再生中の曲番号
 
 【その他のフラグ・カウンター】
-  （自分のものを追加）
+  songs              : Song[] = （曲データで初期化） // 曲名・音階列・長さ・BPMなど
+  playbackStartMillis: unsigned long = 0            // 現在曲の再生開始時刻
+  elapsedSec         : unsigned int = 0             // 現在曲の経過再生時間（秒）
 ```
 
 ---
