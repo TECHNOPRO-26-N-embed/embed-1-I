@@ -33,7 +33,7 @@
 
 ```
 【ピン定義】
-  PIN_BUTTON    = 2    // タクトスイッチ（INPUT_PULLUP）
+  PIN_BUTTON    = 2    // タクトスイッチ（INPUT_PULLUP, 再生・停止用ボタン）
   PIN_LED_RED   = 9    // 赤LED
   PIN_LED_BLUE  = 10   // 青LED
   PIN_LED_GREEN = 11   // 緑LED
@@ -50,14 +50,17 @@
   currentState  : int = 0   // 0:待機 1:再生中 2:完了 3:エラー
 
 【タイマー（millis()用）】
-  lastMillis_Note : unsigned long = 0
-  noteInterval    : unsigned int = 0
+  lastMillis_Note    : unsigned long = 0      // 曲再生用（音階切替）
+  noteInterval       : unsigned int = 375     // 例: 1曲80音なら30秒÷80=375ms/音
+  lastMillis_Buzzer  : unsigned long = 20     // ブザー音符更新（20ms）
+  lastMillis_Button  : unsigned long = 10     // ボタン監視（10ms）
+  lastMillis_LCD     : unsigned long = 250    // LCD表示更新（250ms）
 
 【曲データ・再生管理】
-  songIndex     : int = 0         // 曲リストのインデックス
-  noteIndex     : int = 0         // 曲中の音階インデックス
-  songList      : 配列            // 曲名リスト
-  currentSong   : 構造体/配列     // 再生中の曲データ
+  songIndex     : int = 0         // 曲リストのインデックス（0〜1）
+  noteIndex     : int = 0         // 曲中の音階インデックス（0〜79）
+  songList      : String[2] = {"きらきら星", "かえるのうた"} // 曲名リスト（例：2曲）
+  currentSong   : int[80]         // 再生中の曲データ（音階番号の配列、最大80音）
 
 【LCD表示】
   lcd           : LiquidCrystal   // LCDオブジェクト
@@ -143,9 +146,11 @@
 【処理の流れ】
 
 ＜毎ループ実行すること＞
-  - ボタン入力をreadButton()で取得
-  - 現在時刻を取得: now = millis()
-  - LCD表示は必要に応じてupdateLCD()で更新
+  - ボタン入力をreadButton()で取得（lastMillis_Button, 10ms周期）      // #1 ボタン入力取得・デバウンス
+  - ブザー音符更新（lastMillis_Buzzer, 20ms周期）                   // #2 ブザー音の制御
+  - LCD表示は必要に応じてupdateLCD()で更新（lastMillis_LCD, 250ms周期） // #3 LCD表示の更新
+  - 現在時刻を取得: now = millis()                                   // #4 millis()は「起動からの経過ミリ秒」を返す。タイマー管理や一定周期ごとの処理判定に使う（例: 前回処理時刻との差分で音階進行やデバウンス判定など）
+  // #5 ここまでを毎ループで必ず実行
 
 ＜currentState が 0（待機中）のとき＞
   - ボタンが押されたら再生開始（currentState = 1）
@@ -157,6 +162,7 @@
   - LCDに曲名を表示
   - noteInterval経過後、次の音へ進む
   - 曲が終わったらcurrentState = 2
+  - ボタンが押されたら再生停止（currentState = 0、stopAll()で全出力OFF）
 
 ＜currentState が 2（完了）のとき＞
   - LCDに「再生完了」表示
@@ -189,6 +195,9 @@
 
 【エラー・異常ケース】
 - 異常なノイズは無視
+ 
+【備考】
+ - loop()内でcurrentStateに応じて「再生開始」「再生停止」「リセット」などの判定に使う
 ```
 
 ### `playNote()` — 指定した音階を鳴らし、LEDを点灯
@@ -241,6 +250,7 @@
 1. 全LED消灯
 2. ブザー停止
 3. LCDクリア
+ 4. 状態を待機(currentState=0)に戻す（再生停止時にも利用）
 ```
 
 ---
@@ -282,9 +292,11 @@
   4. 条件を満たさない場合: 何もしない（次のループで再チェック）
 
 【自分のシステムで millis() を使う処理】
-  - 曲再生時の音階切り替えタイミング
-  - LED点灯の消灯タイミング
-  - ボタンのデバウンス
+  - 曲再生時の音階切り替えタイミング（lastMillis_Note, noteInterval）
+  - LED点灯の消灯タイミング（必要に応じてlastMillis_Buzzer等）
+  - ボタンのデバウンス・監視（lastMillis_Button, 10ms）
+  - LCD表示更新（lastMillis_LCD, 250ms）
+  - ブザー音符更新（lastMillis_Buzzer, 20ms）
 ```
 
 ---
@@ -337,6 +349,7 @@
 | 4 | readSensor() | センサーを遮蔽・範囲外に向ける | 誤動作しない | | [ ] |
 | 5 | selectSong() | ボタン長押しで曲を切り替え | 曲名が順に表示される | | [ ] |
 | 6 | updateLCD() | 状態ごとにLCD表示を確認 | 状態・曲名・エラーが正しく表示される | | [ ] |
+| 7 | loop() | 再生中にボタンを押す | 曲の再生が停止し待機状態に戻る | | [ ] |
 
 ### 5-2. 出力系テスト
 
@@ -346,6 +359,7 @@
 | 2 | updateOutput(1) | state=1（動作中）を渡す | 赤LEDが点灯、ブザーが鳴る | | [ ] |
 | 3 | playNote() | 曲データの音階・長さを渡す | 対応するLED（赤・青・緑・黄）が点灯し、ブザーが鳴る | | [ ] |
 | 4 | stopAll() | 再生完了後に呼ぶ | 全LED消灯・ブザー停止・LCDクリア | | [ ] |
+| 5 | stopAll() | 再生中にボタンで停止 | 全LED消灯・ブザー停止・LCDクリア・待機状態に戻る | | [ ] |
 
 ### 5-3. タイミング・並行動作テスト
 
@@ -403,14 +417,15 @@
 
 | No | 指摘内容 | 指摘者 | 対応 |
 |:---|:---|:---|:---|
-| 1 |  |  |  |
-| 2 |  |  |  |
-| 3 |  |  |  |
+| 1 | 4色だけで全部の音階が足りないのでは？ | 高瀬さん | 色の使いまわしで考えています |
+| 2 | millis変数の質問 | 松田さん | グローバル変数に書いてあった。 |
+| 3 | オーバーフローは起きない？ | 志村さん | 30で区切りをつけている |
 
 ### 7-2. レビューを受けて変更した点
 
--
--
+1. LED色の使いまわしについて、設計書内で「4色LEDを音階に割り当て、足りない場合は繰り返し割り当てる」旨を明記。
+2. millis変数の用途・定義をグローバル変数欄と各処理フローに明記。
+3. オーバーフロー対策として、30秒ごとに処理を区切る設計を明記。
 
 ---
 
