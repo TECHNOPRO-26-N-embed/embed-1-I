@@ -378,8 +378,6 @@ const int measureInterval = 100; // 測定周期(ms)
 | 8 | judgeState() | d=20 を入力 | state=3（強警告）が返る（境界値） | | [ ] |
 | 9 | loop()（currentMillis判定） | currentMillis - prevMeasureTime < 100 の状態で1ループ実行 | 距離測定を実行せず、stateを維持 | | [ ] |
 |10 | loop()（currentMillis判定） | currentMillis - prevMeasureTime >= 100 の状態で1ループ実行 | measureDistance() が1回実行される | | [ ] |
-|11 | デバウンス処理 | 50ms未満の連続ボタン入力 | 状態が切り替わらない | | [ ] |
-|12 | デバウンス処理 | 50ms以上の間隔でボタン入力 | 状態が切り替わる | | [ ] |
 
 ### 5-2. 出力系テスト
 
@@ -395,8 +393,6 @@ const int measureInterval = 100; // 測定周期(ms)
 | 8 | controlBuzzer() | state=-1, 任意のcurrentMillis | 強警告（2000Hz連続音）となる（想定外stateの安全動作） | | [ ] |
 | 9 | controlBuzzer() | state=4, 任意のcurrentMillis | 強警告（2000Hz連続音）となる（想定外stateの安全動作） | | [ ] |
 |10 | Serial出力 | 距離測定時 | Serial.println(distance) で距離が出力される | | [ ] |
-|11 | Serial出力 | 状態判定時 | Serial.println(state) でstateが出力される | | [ ] |
-|12 | Serial出力 | 異常値・警告時 | Serial.println("WARN: sensor abnormal") など警告メッセージが出力される | | [ ] |
 
 ### 5-3. タイミング・並行動作テスト
 
