@@ -127,7 +127,8 @@
 | isPlaying | 再生中かどうか | bool | 1B | true | 再生/停止ボタンで切替 |
 | lastInputMillis | ボタン入力の最終確定時刻 | unsigned long | 4B | 0 | デバウンス（50ms）に使用 |
 | songs | 1曲ごとの情報を持つ構造体配列（曲名、音階列、長さ、BPMなど） | Song[] | 可変 | 曲データで初期化 | 1曲につき1構造体を用意 |
-| currentSongIndex | 現在再生中の曲番号 | int | 2B | 0 | ポテンションメーター操作で前曲/次曲に更新 |
+| currentSongIndex | 現在再生中の曲番号 | 
+ | 2B | 0 | ポテンションメーター操作で前曲/次曲に更新 |
 | playbackStartMillis | 現在曲の再生開始時刻 | unsigned long | 4B | 0 | 再生時間表示の基準時刻 |
 | elapsedSec | 現在曲の経過再生時間（秒） | unsigned int | 2B | 0 | LCD 2行目に表示 |
 
@@ -157,7 +158,7 @@
 |:--|:--|:--|:--|:--|:--|:--|
 | — | 初期化 | `setup()` | ピンモード設定、LCD初期化、曲データ初期化を行う | なし | なし | 起動時1回 |
 | — | （共通）待機・制御 | `loop()` | 入力読取→状態更新→表示更新を周期実行する | なし | なし | 常時 |
-| — | （共通）ボタン読出 | `readButtons()` | 3個のボタン入力をデバウンス付きで取得する | なし | ButtonState | loop()内 |
+| — | （共通）ボタン読出 | `readButtons()` | ボタン入力をデバウンス付きで取得する | なし | ButtonState | loop()内 |
 | — | （共通）ポテンショメータ読出 | `readPotentiometer()` | 可変抵抗値を読み取り、前曲/次曲判定用のゾーン値に変換する | なし | int | loop()内 |
 | — | （共通）LCD更新 | `updateLcdDisplay()` | 現在の曲名と再生時間をLCD1602に表示する | songName, elapsedSec | なし | loop()内 |
 | F01 | 必須機能①: 曲名表示 | `displayCurrentSongName()` | 再生中の曲名を1行目に表示する | currentSongIndex | なし | loop()内 |
