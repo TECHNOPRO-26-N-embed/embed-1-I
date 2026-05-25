@@ -56,6 +56,9 @@
   lastMillis_Button  : unsigned long = 10     // ボタン監視（10ms）
   lastMillis_LCD     : unsigned long = 250    // LCD表示更新（250ms）
 
+【オーバーフロー対策】
+  millis()の値が大きくなりすぎてオーバーフローすることを防ぐため、1曲の再生を30秒以内に収め、30秒ごとにタイマーやインデックスをリセットする設計としています。
+
 【曲データ・再生管理】
   songIndex     : int = 0         // 曲リストのインデックス（0〜1）
   noteIndex     : int = 0         // 曲中の音階インデックス（0〜79）
