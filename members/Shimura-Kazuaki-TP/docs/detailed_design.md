@@ -21,7 +21,7 @@
 |:--|:--|
 | 作品タイトル | ミニチュア版歩行者信号灯 |
 | 状態の種類（1-2 状態遷移から） | 2種類（赤信号中、青信号中） |
-| 実装する関数の数（2-2 関数一覧から） | 5　個 |
+| 実装する関数の数（2-2 関数一覧から） | 7　個 |
 | グローバル変数の合計バイト数（2-1 SRAM確認から） | 19 B（設計値） |
 
 ---
@@ -131,8 +131,11 @@
 ＜毎ループ実行すること＞
   - nowMillis = millis() を取得する
   - currentSignalState = updateSignalState(nowMillis) を呼ぶ（時間経過で赤/青を切り替える）
+  - checkStateStuck(nowMillis) を呼ぶ
+    - true が返った場合は currentSignalState を 0（赤信号中）として扱い、以降の出力を安全側で再適用する
   - applySignalLeds(currentSignalState) を呼ぶ（状態に応じてLEDを反映する）
-  - applySignalBuzzer(currentSignalState, greenToneHz) を呼ぶ（青のときだけ音を出す）
+  - applySignalBuzzer(currentSignalState, greenToneHz) を呼ぶ（状態が変化したときだけ tone/noTone を更新する）
+  - enforceBuzzerConsistency(currentSignalState, greenToneHz) を呼ぶ（想定外の不一致を補正する）
 
 ＜currentSignalState が 0（赤信号中）のとき＞
   - 赤の時間（redDurationMs）に達するまで赤LEDを点灯し続ける
@@ -140,7 +143,7 @@
 
 ＜currentSignalState が 1（青信号中）のとき＞
   - 青の時間（greenDurationMs）に達するまで緑LEDを点灯し続ける
-  - ブザーを greenToneHz で鳴らし続ける
+  - ブザーは greenToneHz を維持する（毎ループで tone を再発行しない）
 
 ＜異常時（監視ロジックで検知）のとき＞
   - 想定外の状態値になった場合は currentSignalState を 0（赤信号中）に戻す
@@ -160,17 +163,21 @@
 
 ```
 【処理の流れ】
-1. elapsed = nowMillis - stateStartMillis を計算する。
-2. currentSignalState が 0 かつ elapsed >= redDurationMs の場合:
+1. currentSignalState が 0/1 以外なら、以下を実行して終了する。
+  - currentSignalState = 0 に矯正
+  - stateStartMillis = nowMillis に再初期化
+  - currentSignalState を返す
+2. elapsed = nowMillis - stateStartMillis を計算する。
+3. currentSignalState が 0 かつ elapsed >= redDurationMs の場合:
   - currentSignalState = 1 に更新
   - stateStartMillis = nowMillis に更新
-3. currentSignalState が 1 かつ elapsed >= greenDurationMs の場合:
+4. currentSignalState が 1 かつ elapsed >= greenDurationMs の場合:
   - currentSignalState = 0 に更新
   - stateStartMillis = nowMillis に更新
-4. currentSignalState を返す。
+5. currentSignalState を返す。
 
 【エラー・異常ケース】
-- currentSignalState が 0/1 以外なら 0 に矯正し、stateStartMillis を nowMillis で再初期化する。
+- currentSignalState の異常値は最優先で補正し、以降の遷移判定は行わない。
 ```
 
 ---
@@ -195,7 +202,7 @@
   - 安全側として redLedPin を HIGH、greenLedPin を LOW
 
 【エラー・異常ケース】
-- 想定外の状態値は赤信号表示に固定し、次ループの状態更新で復帰を待つ。
+- 想定外の状態値は赤信号表示に固定し、状態更新処理で正規状態（0/1）へ復帰させる。
 ```
 
 ---
@@ -211,13 +218,14 @@
 
 ```
 【処理の流れ】
-1. signalState == 1 の場合、tone(buzzerPin, toneHz) を実行する。
-2. signalState == 0 の場合、noTone(buzzerPin) を実行する。
-3. 実行した状態を lastBuzzerAppliedState に記録する。
+1. signalState が 0/1 以外、または toneHz <= 0 の場合は noTone(buzzerPin) を実行し、lastBuzzerAppliedState = 0 を記録して終了する。
+2. signalState と lastBuzzerAppliedState を比較し、同じなら何もしない（再設定しない）。
+3. signalState == 1 の場合のみ tone(buzzerPin, toneHz) を実行する。
+4. signalState == 0 の場合は noTone(buzzerPin) を実行する。
+5. 実際に反映した状態を lastBuzzerAppliedState に記録する。
 
 【エラー・異常ケース】
-- toneHz <= 0 の場合は noTone(buzzerPin) を実行して無音にする。
-- signalState が 0/1 以外なら noTone(buzzerPin) を実行する。
+- 異常値（signalState 不正、toneHz <= 0）は必ず無音側に倒して安全優先とする。
 ```
 
 ---
@@ -232,15 +240,17 @@
 
 ```
 【処理の流れ】
-1. expectedLimit を currentSignalState に応じて設定する
+1. expectedLimit を stateStuckLimitMs で初期化する。
+2. currentSignalState に応じて expectedLimit を上書きする。
   - 赤信号中: redDurationMs * 2
   - 青信号中: greenDurationMs * 2
-2. nowMillis - stateStartMillis > expectedLimit の場合は異常と判定する。
-3. 異常時は currentSignalState = 0、stateStartMillis = nowMillis に再初期化する。
-4. true を返す。異常なしなら false を返す。
+3. expectedLimit が 0 の場合は stateStuckLimitMs を代替閾値として使う。
+4. nowMillis - stateStartMillis > expectedLimit の場合は異常と判定する。
+5. 異常時は currentSignalState = 0、stateStartMillis = nowMillis に再初期化し、true を返す。
+6. 異常なしなら false を返す。
 
 【エラー・異常ケース】
-- expectedLimit が 0 になる設定ミス時は stateStuckLimitMs を代替閾値として使う。
+- 設定値異常で expectedLimit が 0 になっても、stateStuckLimitMs を使って監視を継続する。
 ```
 
 ---
@@ -256,13 +266,16 @@
 
 ```
 【処理の流れ】
-1. 期待状態を判定する（赤: noTone、青: tone）。
-2. lastBuzzerAppliedState と signalState が不一致なら補正処理を実行する。
-3. 赤信号中は noTone(buzzerPin)、青信号中は tone(buzzerPin, toneHz) を再適用する。
-4. lastBuzzerAppliedState を signalState に更新する。
+1. signalState が 0/1 以外の場合は noTone(buzzerPin) を実行し、lastBuzzerAppliedState = 0 を記録して終了する。
+2. 期待状態を判定する（赤: noTone、青: tone）。
+3. lastBuzzerAppliedState と signalState が一致していれば何もしない。
+4. 不一致時のみ補正処理を実行する。
+  - 赤信号中は noTone(buzzerPin) を再適用
+  - 青信号中かつ toneHz > 0 の場合は tone(buzzerPin, toneHz) を再適用
+5. lastBuzzerAppliedState を signalState に更新する。
 
 【エラー・異常ケース】
-- toneHz が異常値のときは無音側（noTone）へ倒して安全優先とする。
+- toneHz が異常値（toneHz <= 0）のときは noTone(buzzerPin) を実行し、lastBuzzerAppliedState = 0 に更新する。
 ```
 
 ---
@@ -299,12 +312,14 @@
   2. 赤信号中なら elapsed = nowMillis - stateStartMillis を計算し、elapsed >= redDurationMs を判定する。
   3. 青信号中なら elapsed = nowMillis - stateStartMillis を計算し、elapsed >= greenDurationMs を判定する。
   4. 遷移したら stateStartMillis = nowMillis に更新する。
-  5. ループごとに LED/ブザー出力を反映し、遷移待ち中も処理を止めない。
+  5. ループごとに LED出力を反映し、ブザーは状態変化時のみ更新する（毎ループでtoneを再発行しない）。
+  6. 異常監視（状態停止・ブザー不一致）を毎ループ実行し、必要時は安全側へ補正する。
 
 【自分のシステムで millis() を使う処理】
   - 信号状態の切り替え判定（赤→青 / 青→赤）
-  - 出力反映（LED点灯、青信号中ブザー鳴動）
+  - 出力反映（LED点灯、青信号時ブザー維持）
   - 異常監視（状態停止の検知）
+  - ブザー不一致補正のタイミング管理
 ```
 
 ---
@@ -320,8 +335,9 @@
   - nowMillis - stateStartMillis が状態時間の2倍を超えたら異常と判定。
   - currentSignalState を赤信号中へ戻し、stateStartMillis を再初期化。
 2. ブザー不一致監視:
-  - signalState と lastBuzzerAppliedState を比較。
-  - 不一致時は tone/noTone を再適用して補正。
+  - currentSignalState と lastBuzzerAppliedState を比較。
+  - 不一致時のみ tone/noTone を再適用して補正。
+  - toneHz <= 0 の場合は無音側（noTone）へ強制補正。
 3. 安全側出力:
   - 想定外の状態値が来たら赤LED点灯 + noTone へ強制遷移。
 
@@ -359,8 +375,11 @@
 | 1 | updateSignalState(nowMillis) | 赤信号中で 5000ms 経過させる | 戻り値が青信号中（1）になる | | [ ] |
 | 2 | updateSignalState(nowMillis) | 青信号中で 5000ms 経過させる | 戻り値が赤信号中（0）になる | | [ ] |
 | 3 | updateSignalState(nowMillis) | stateStartMillis から 4999ms 時点で確認 | 状態が切り替わらない | | [ ] |
-| 4 | checkStateStuck(nowMillis) | 同一状態で 10000ms 超を作る | true を返し赤信号中に復帰する | | [ ] |
-| 5 | enforceBuzzerConsistency() | lastBuzzerAppliedState を不一致にして実行 | 状態に応じた tone/noTone に補正される | | [ ] |
+| 4 | updateSignalState(nowMillis) | currentSignalState=2（異常値）で実行 | 0に矯正され、stateStartMillis が nowMillis で再初期化される | | [ ] |
+| 5 | checkStateStuck(nowMillis) | 同一状態で 10000ms ちょうどを作る | 異常判定されず false を返す | | [ ] |
+| 6 | checkStateStuck(nowMillis) | 同一状態で 10001ms を作る | 異常判定され true を返し赤信号中に復帰する | | [ ] |
+| 7 | enforceBuzzerConsistency(signalState, toneHz) | lastBuzzerAppliedState を不一致にして実行 | 状態に応じた tone/noTone に補正される | | [ ] |
+| 8 | enforceBuzzerConsistency(signalState, toneHz) | lastBuzzerAppliedState と signalState を一致させて実行 | 余計な再適用をせず状態を維持する | | [ ] |
 
 ### 5-2. 出力系テスト
 
@@ -368,7 +387,10 @@
 |:---|:---|:---|:---|:---|:---|
 | 1 | applySignalLeds(0) | signalState=0 を渡す | 赤LED点灯、緑LED消灯になる | | [ ] |
 | 2 | applySignalLeds(1) | signalState=1 を渡す | 緑LED点灯、赤LED消灯になる | | [ ] |
-| 3 | applySignalBuzzer(0, 2000) / applySignalBuzzer(1, 2000) | 赤・青それぞれの状態で呼び分ける | 赤は無音、青のみ2000Hzで鳴る | | [ ] |
+| 3 | applySignalLeds(2) | signalState=2（異常値）を渡す | 安全側として赤LED点灯、緑LED消灯になる | | [ ] |
+| 4 | applySignalBuzzer(0, 2000) / applySignalBuzzer(1, 2000) | 赤・青それぞれの状態で呼び分ける | 赤は無音、青のみ2000Hzで鳴る | | [ ] |
+| 5 | applySignalBuzzer(1, 2000) を連続2回 | 1回目で鳴動開始後、同じ状態で再実行する | 2回目は再設定せず鳴動状態を維持する | | [ ] |
+| 6 | applySignalBuzzer(1, 0) | toneHz=0 を渡す | noTone が適用され無音になる | | [ ] |
 
 ### 5-3. タイミング・並行動作テスト
 
@@ -390,7 +412,16 @@
 
 **AIの回答（要約）：**
 
+loop の処理フローと異常系関数の接続が弱い
+loop の記述は「異常時に戻す」と書かれていますが、現在の毎ループ処理に checkStateStuck / enforceBuzzerConsistency を呼ぶ流れが明示されていない。
+結果として、異常系が設計だけで終わり、コードに載らないリスクがある。
+
+ブザー制御を毎ループで tone し続ける設計は不安定化しやすい
+applySignalBuzzer を毎ループ呼ぶ前提だと、ボードや実装次第で音が途切れる・不安定になる可能性がある。
+状態変化時だけ tone/noTone を更新する形（前回状態との差分適用）に寄せると安全。
+
 **対応した内容：**
+対処した。
 
 ---
 
@@ -400,7 +431,20 @@
 
 **AIの回答（要約）：**
 
+異常値テスト不足（状態値異常、toneHz異常）
+理由: 安全側へ倒す設計を入れているのに、そこが未検証だと実機で誤動作時に止めきれない可能性がある。
+
+applySignalBuzzer の「同状態なら再設定しない」仕様の未検証
+理由: 今回の安定化の要点そのもの。ここを試験しないと、毎ループ再発行に戻っても気づきにくい。
+
 **対応した内容：**
+- updateSignalState の異常値入力テスト（currentSignalState=2）を追加。
+- checkStateStuck の境界値テスト（10000msちょうど / 10001ms）を追加。
+- applySignalLeds の異常値入力テスト（signalState=2）を追加。
+- applySignalBuzzer の異常値テスト（toneHz=0）を追加。
+- applySignalBuzzer の「同状態なら再設定しない」確認テスト（連続2回呼び出し）を追加。
+- enforceBuzzerConsistency の一致時/不一致時の両ケースを確認するテストを追加。
+
 
 ---
 
