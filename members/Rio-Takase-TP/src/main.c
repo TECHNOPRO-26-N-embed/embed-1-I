@@ -1,0 +1,380 @@
+#include <LiquidCrystal.h>
+
+//==============================
+// ピン設定
+//==============================
+const int BUZZ_PIN = 3;
+LiquidCrystal lcd(7, 8, 9, 10, 11, 12);
+
+//==============================
+// グローバル変数
+//==============================
+const int POT_PIN = A0;
+const unsigned long POT_INTERVAL_MS = 100;
+const int POT_PREV_THRESHOLD = 150;  // これ以下で前の曲
+const int POT_NEXT_THRESHOLD = 850;  // これ以上で次の曲
+
+unsigned long lastCheckMillis_Pot = 0;
+int currentSongIndex = 0;
+int lastPotZone = 0; // -1:前, 0:中立, 1:次
+
+// メロディーの長さ（melody 定義後に計算するのが重要）
+const int NUM_NOTES = 3;
+
+//==============================
+// 曲を一曲前に/次に切り替える関数
+//==============================
+void readPotentiometer()
+{
+    unsigned long now = millis();
+
+    // 1) 周期管理
+    if (now - lastCheckMillis_Pot < POT_INTERVAL_MS)
+    {
+        return;
+    }
+    lastCheckMillis_Pot = now;
+
+    // 2) ポテンショメータ値取得
+    int potValue = analogRead(POT_PIN);
+
+    // 3) 異常値ガード（仕様の異常系）
+    if (potValue < 0 || potValue > 1023)
+    {
+        return;
+    }
+
+    // 4) ゾーン判定
+    int zone = 0;
+    if (potValue <= POT_PREV_THRESHOLD)
+    {
+        zone = -1;
+    }
+    else if (potValue >= POT_NEXT_THRESHOLD)
+    {
+        zone = 1;
+    }
+
+    // 5) 閾値超え時のみ曲切替
+    //    同じ端に回し続けたときの連続切替を防ぐため、ゾーン変化時のみ反映
+    if (zone != 0 && zone != lastPotZone)
+    {
+        currentSongIndex += zone;
+
+        // 範囲外対策（ループ）
+        if (currentSongIndex < 0)
+        {
+            currentSongIndex = NUM_NOTES - 1;
+        }
+        else if (currentSongIndex >= NUM_NOTES)
+        {
+            currentSongIndex = 0;
+        }
+    }
+
+    lastPotZone = zone;
+}
+
+//==============================
+// 音程を列挙体で定義
+//==============================
+enum Pitch
+{
+    NOTE_REST, // 休符
+    NOTE_C,
+    NOTE_D,
+    NOTE_E,
+    NOTE_F,
+    NOTE_G,
+    NOTE_A,
+    NOTE_B
+};
+
+//==============================
+// 1音を表す構造体
+//==============================
+struct Note
+{
+    enum Pitch pitch; // 音程
+    int octave;       // オクターブ（4, 5 など）
+    int duration;     // 音の長さ（ms）
+};
+
+//==============================
+// メロディーデータ
+//==============================
+
+struct Note melody[3][64] = {
+    {// カエルの歌
+     {NOTE_C, 4, 600},
+     {NOTE_D, 4, 600},
+     {NOTE_E, 4, 600},
+     {NOTE_F, 4, 600},
+     {NOTE_E, 4, 600},
+     {NOTE_D, 4, 600},
+     {NOTE_C, 4, 600},
+     {NOTE_REST, 4, 600},
+     {NOTE_E, 4, 600},
+     {NOTE_F, 4, 600},
+     {NOTE_G, 4, 600},
+     {NOTE_A, 4, 600}, //
+     {NOTE_G, 4, 600},
+     {NOTE_F, 4, 600},
+     {NOTE_E, 4, 600},
+     {NOTE_REST, 4, 600},
+     {NOTE_C, 4, 600},
+     {NOTE_REST, 4, 600},
+     {NOTE_C, 4, 600},
+     {NOTE_REST, 4, 600},
+     {NOTE_C, 4, 600},
+     {NOTE_REST, 4, 600},
+     {NOTE_C, 4, 600},
+     {NOTE_REST, 4, 600},
+     {NOTE_C, 4, 300},
+     {NOTE_C, 4, 300},
+     {NOTE_D, 4, 300},
+     {NOTE_D, 4, 300},
+     {NOTE_E, 4, 300},
+     {NOTE_E, 4, 300},
+     {NOTE_F, 4, 300},
+     {NOTE_F, 4, 300},
+     {NOTE_E, 4, 600},
+     {NOTE_D, 4, 600},
+     {NOTE_C, 4, 600},
+     {NOTE_REST, 4, 600},
+     {NOTE_REST, 5, 600}},
+    {// きらきら星
+     {NOTE_C, 4, 300},
+     {NOTE_C, 4, 300},
+     {NOTE_G, 4, 300},
+     {NOTE_G, 4, 300},
+     {NOTE_A, 4, 300},
+     {NOTE_A, 4, 300},
+     {NOTE_G, 4, 600},
+     {NOTE_F, 4, 300},
+     {NOTE_F, 4, 300},
+     {NOTE_E, 4, 300},
+     {NOTE_E, 4, 300},
+     {NOTE_D, 4, 300},
+     {NOTE_D, 4, 300},
+     {NOTE_C, 4, 600},
+     {NOTE_C, 4, 300},
+     {NOTE_C, 4, 300},
+     {NOTE_G, 4, 300},
+     {NOTE_G, 4, 300},
+     {NOTE_A, 4, 300},
+     {NOTE_A, 4, 300},
+     {NOTE_G, 4, 600},
+     {NOTE_F, 4, 300},
+     {NOTE_F, 4, 300},
+     {NOTE_E, 4, 300},
+     {NOTE_E, 4, 300},
+     {NOTE_D, 4, 300},
+     {NOTE_D, 4, 300},
+     {NOTE_C, 4, 600},
+     {NOTE_G, 4, 300},
+     {NOTE_G, 4, 300},
+     {NOTE_F, 4, 300},
+     {NOTE_F, 4, 300},
+     {NOTE_E, 4, 300},
+     {NOTE_E, 4, 300},
+     {NOTE_D, 4, 600},
+     {NOTE_G, 4, 300},
+     {NOTE_G, 4, 300},
+     {NOTE_F, 4, 300},
+     {NOTE_F, 4, 300},
+     {NOTE_E, 4, 300},
+     {NOTE_E, 4, 300},
+     {NOTE_D, 4, 600},
+     {NOTE_C, 4, 300},
+     {NOTE_C, 4, 300},
+     {NOTE_G, 4, 300},
+     {NOTE_G, 4, 300},
+     {NOTE_A, 4, 300},
+     {NOTE_A, 4, 300},
+     {NOTE_G, 4, 600},
+     {NOTE_F, 4, 300},
+     {NOTE_F, 4, 300},
+     {NOTE_E, 4, 300},
+     {NOTE_E, 4, 300},
+     {NOTE_D, 4, 300},
+     {NOTE_D, 4, 300},
+     {NOTE_C, 4, 600},
+     {NOTE_REST, 5, 600}},
+    {// ハッピーバースデー
+     {NOTE_G, 4, 450},
+     {NOTE_G, 4, 150},
+     {NOTE_A, 4, 600},
+     {NOTE_G, 4, 600},
+     {NOTE_C, 5, 600},
+     {NOTE_B, 4, 1200},
+     {NOTE_G, 4, 450},
+     {NOTE_G, 4, 150},
+     {NOTE_A, 4, 600},
+     {NOTE_G, 4, 600},
+     {NOTE_D, 5, 600},
+     {NOTE_C, 5, 1200},
+     {NOTE_G, 4, 450},
+     {NOTE_G, 4, 150},
+     {NOTE_G, 5, 600},
+     {NOTE_E, 5, 600},
+     {NOTE_C, 5, 600},
+     {NOTE_B, 4, 600},
+     {NOTE_A, 4, 1200},
+     {NOTE_F, 5, 450},
+     {NOTE_F, 5, 150},
+     {NOTE_E, 5, 600},
+     {NOTE_C, 5, 600},
+     {NOTE_D, 5, 600},
+     {NOTE_C, 5, 1200},
+     {NOTE_REST, 5, 600}}};
+
+//==============================
+// enum → 周波数変換
+//==============================
+int pitchToFrequency(enum Pitch pitch, int octave)
+{
+    if (pitch == NOTE_REST)
+        return 0;
+
+    int baseFreq = 0;
+
+    switch (pitch)
+    {
+    case NOTE_C:
+        baseFreq = 262;
+        break;
+    case NOTE_D:
+        baseFreq = 294;
+        break;
+    case NOTE_E:
+        baseFreq = 330;
+        break;
+    case NOTE_F:
+        baseFreq = 349;
+        break;
+    case NOTE_G:
+        baseFreq = 392;
+        break;
+    case NOTE_A:
+        baseFreq = 440;
+        break;
+    case NOTE_B:
+        baseFreq = 494;
+        break;
+    default:
+        return 0;
+    }
+
+    // octave = 4 を基準に上下させる（負のシフト対策済み）
+    int shift = octave - 4;
+    if (shift > 0)
+    {
+        return baseFreq << shift;
+    }
+    else if (shift < 0)
+    {
+        return baseFreq >> (-shift);
+    }
+    else
+    {
+        return baseFreq;
+    }
+}
+
+//==============================
+// 初期化
+//==============================
+void setup()
+{
+    // pinMode(BUZZ_PIN, OUTPUT);
+    lcd.begin(16, 2);
+}
+
+//==============================
+// メインループ
+//==============================
+// void loop()
+// {
+//     lcd.setCursor(0, 1);
+//     lcd.print(millis() / 1000);
+//     while (1)
+//     {
+//         for (int j = 0; j < NUM_NOTES; j++)
+//         {
+//             for (int i = 0; i < 64; i++)
+//             {
+//                 readPotentiometer();
+
+//                 switch (j)
+//                 {
+//                 case 0:
+//                     lcd.setCursor(0, 0);
+//                     lcd.print("The Flog Song   ");
+//                     break;
+//                 case 1:
+//                     lcd.setCursor(0, 0);
+//                     lcd.print("Kirakira Boshi");
+//                     break;
+//                 case 2:
+//                     lcd.setCursor(0, 0);
+//                     lcd.print("Happy Birthday!");
+//                     break;
+//                 }
+
+//                 int freq = pitchToFrequency(melody[j][i].pitch, melody[j][i].octave);
+
+//                 if (freq > 0)
+//                 {
+//                     // 音の長さの90%だけ鳴らす（安全設計）
+//                     int playTime = melody[j][i].duration * 0.9;
+//                     tone(BUZZ_PIN, freq, playTime);
+//                 }
+
+//                 delay(melody[j][i].duration);
+//             }
+//         }
+//     }
+// }
+
+void loop()
+{
+    lcd.setCursor(0, 1);
+    lcd.print(millis() / 1000);
+    while (1)
+    {
+        readPotentiometer();
+        int prevSongIndex = currentSongIndex;
+        for (int i = 0; i < 64; i++)
+        {
+            switch (currentSongIndex)
+            {
+            case 0:
+                lcd.setCursor(0, 0);
+                lcd.print("The Flog Song   ");
+                break;
+            case 1:
+                lcd.setCursor(0, 0);
+                lcd.print("Kirakira Boshi");
+                break;
+            case 2:
+                lcd.setCursor(0, 0);
+                lcd.print("Happy Birthday!");
+                break;
+            }
+            int freq = pitchToFrequency(melody[currentSongIndex][i].pitch, melody[currentSongIndex][i].octave);
+
+            if (freq > 0)
+            {
+                int playTime = melody[currentSongIndex][i].duration * 0.9;
+                tone(BUZZ_PIN, freq, playTime);
+            }
+
+            delay(melody[currentSongIndex][i].duration);
+            readPotentiometer();
+            if (currentSongIndex != prevSongIndex) {
+                break;
+            }
+        }
+    }
+}
