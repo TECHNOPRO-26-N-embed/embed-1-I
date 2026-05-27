@@ -9,71 +9,9 @@ LiquidCrystal lcd(7, 8, 9, 10, 11, 12);
 //==============================
 // グローバル変数
 //==============================
-const int POT_PIN = A0;
-const unsigned long POT_INTERVAL_MS = 100;
-const int POT_PREV_THRESHOLD = 150;  // これ以下で前の曲
-const int POT_NEXT_THRESHOLD = 850;  // これ以上で次の曲
-
-unsigned long lastCheckMillis_Pot = 0;
-int currentSongIndex = 0;
-int lastPotZone = 0; // -1:前, 0:中立, 1:次
 
 // メロディーの長さ（melody 定義後に計算するのが重要）
 const int NUM_NOTES = 3;
-
-//==============================
-// 曲を一曲前に/次に切り替える関数
-//==============================
-void readPotentiometer()
-{
-    unsigned long now = millis();
-
-    // 1) 周期管理
-    if (now - lastCheckMillis_Pot < POT_INTERVAL_MS)
-    {
-        return;
-    }
-    lastCheckMillis_Pot = now;
-
-    // 2) ポテンショメータ値取得
-    int potValue = analogRead(POT_PIN);
-
-    // 3) 異常値ガード（仕様の異常系）
-    if (potValue < 0 || potValue > 1023)
-    {
-        return;
-    }
-
-    // 4) ゾーン判定
-    int zone = 0;
-    if (potValue <= POT_PREV_THRESHOLD)
-    {
-        zone = -1;
-    }
-    else if (potValue >= POT_NEXT_THRESHOLD)
-    {
-        zone = 1;
-    }
-
-    // 5) 閾値超え時のみ曲切替
-    //    同じ端に回し続けたときの連続切替を防ぐため、ゾーン変化時のみ反映
-    if (zone != 0 && zone != lastPotZone)
-    {
-        currentSongIndex += zone;
-
-        // 範囲外対策（ループ）
-        if (currentSongIndex < 0)
-        {
-            currentSongIndex = NUM_NOTES - 1;
-        }
-        else if (currentSongIndex >= NUM_NOTES)
-        {
-            currentSongIndex = 0;
-        }
-    }
-
-    lastPotZone = zone;
-}
 
 //==============================
 // 音程を列挙体で定義
@@ -232,7 +170,7 @@ struct Note melody[3][64] = {
 //==============================
 // enum → 周波数変換
 //==============================
-int pitchToFrequency(enum Pitch pitch, int octave)
+int pitchToFrequency(int pitch, int octave)
 {
     if (pitch == NOTE_REST)
         return 0;
@@ -294,86 +232,40 @@ void setup()
 //==============================
 // メインループ
 //==============================
-// void loop()
-// {
-//     lcd.setCursor(0, 1);
-//     lcd.print(millis() / 1000);
-//     while (1)
-//     {
-//         for (int j = 0; j < NUM_NOTES; j++)
-//         {
-//             for (int i = 0; i < 64; i++)
-//             {
-//                 readPotentiometer();
-
-//                 switch (j)
-//                 {
-//                 case 0:
-//                     lcd.setCursor(0, 0);
-//                     lcd.print("The Flog Song   ");
-//                     break;
-//                 case 1:
-//                     lcd.setCursor(0, 0);
-//                     lcd.print("Kirakira Boshi");
-//                     break;
-//                 case 2:
-//                     lcd.setCursor(0, 0);
-//                     lcd.print("Happy Birthday!");
-//                     break;
-//                 }
-
-//                 int freq = pitchToFrequency(melody[j][i].pitch, melody[j][i].octave);
-
-//                 if (freq > 0)
-//                 {
-//                     // 音の長さの90%だけ鳴らす（安全設計）
-//                     int playTime = melody[j][i].duration * 0.9;
-//                     tone(BUZZ_PIN, freq, playTime);
-//                 }
-
-//                 delay(melody[j][i].duration);
-//             }
-//         }
-//     }
-// }
-
 void loop()
 {
-    lcd.setCursor(0, 1);
-    lcd.print(millis() / 1000);
     while (1)
     {
-        readPotentiometer();
-        int prevSongIndex = currentSongIndex;
-        for (int i = 0; i < 64; i++)
+        for (int j = 0; j < NUM_NOTES; j++)
         {
-            switch (currentSongIndex)
+            for (int i = 0; i < 64; i++)
             {
-            case 0:
-                lcd.setCursor(0, 0);
-                lcd.print("The Flog Song   ");
-                break;
-            case 1:
-                lcd.setCursor(0, 0);
-                lcd.print("Kirakira Boshi");
-                break;
-            case 2:
-                lcd.setCursor(0, 0);
-                lcd.print("Happy Birthday!");
-                break;
-            }
-            int freq = pitchToFrequency(melody[currentSongIndex][i].pitch, melody[currentSongIndex][i].octave);
+                switch (j)
+                {
+                case 0:
+                    lcd.setCursor(0, 0);
+                    lcd.print("The Flog Song   ");
+                    break;
+                case 1:
+                    lcd.setCursor(0, 0);
+                    lcd.print("Kirakira Boshi");
+                    break;
+                case 2:
+                    lcd.setCursor(0, 0);
+                    lcd.print("Happy Birthday!");
+                    break;
+                }
 
-            if (freq > 0)
-            {
-                int playTime = melody[currentSongIndex][i].duration * 0.9;
-                tone(BUZZ_PIN, freq, playTime);
-            }
+                int freq = pitchToFrequency(melody[j][i].pitch, melody[j][i].octave);
 
-            delay(melody[currentSongIndex][i].duration);
-            readPotentiometer();
-            if (currentSongIndex != prevSongIndex) {
-                break;
+                if (freq > 0)
+                {
+                    // 音の長さの90%だけ鳴らす（安全設計）
+                    int playTime = melody[j][i].duration * 0.9;
+                    tone(BUZZ_PIN, freq, playTime);
+                }
+
+                delay(melody[j][i].duration);
             }
         }
     }

@@ -383,26 +383,26 @@ const int measureInterval = 100; // 測定周期(ms)
 
 | No | テスト対象の関数 | 入力・操作 | 期待する結果 | 実際の結果 | 合否 |
 |:---|:---|:---|:---|:---|:---|
-| 1 | controlBuzzer() | state=0, 任意のcurrentMillis | noTone() が呼ばれ無音になる | | [ ] |
-| 2 | controlBuzzer() | state=1, currentMillis - prevBeepTime < 500 | 音状態が切り替わらない | | [ ] |
-| 3 | controlBuzzer() | state=1, currentMillis - prevBeepTime = 499ms | 切替なし（境界値直前） | | [ ] |
-| 4 | controlBuzzer() | state=1, currentMillis - prevBeepTime = 500ms | beepState が反転し tone/noTone が切替（境界値） | | [ ] |
-| 5 | controlBuzzer() | state=2, currentMillis - prevBeepTime = 199ms | 切替なし（境界値直前） | | [ ] |
-| 6 | controlBuzzer() | state=2, currentMillis - prevBeepTime = 200ms | 1500Hz の断続音に切替（境界値） | | [ ] |
-| 7 | controlBuzzer() | state=3, 任意のcurrentMillis | 2000Hz の連続音が出る | | [ ] |
-| 8 | controlBuzzer() | state=-1, 任意のcurrentMillis | 強警告（2000Hz連続音）となる（想定外stateの安全動作） | | [ ] |
-| 9 | controlBuzzer() | state=4, 任意のcurrentMillis | 強警告（2000Hz連続音）となる（想定外stateの安全動作） | | [ ] |
-|10 | Serial出力 | 距離測定時 | Serial.println(distance) で距離が出力される | | [ ] |
+| 1 | controlBuzzer() | state=0, 任意のcurrentMillis | noTone() が呼ばれ無音になる | 無音を確認した | [合] |
+| 2 | controlBuzzer() | state=1, currentMillis - prevBeepTime < 500 | 音状態が切り替わらない | 切り替えは起こらなかった | [合] |
+| 3 | controlBuzzer() | state=1, currentMillis - prevBeepTime = 499ms | 切替なし（境界値直前） | 切り替えは起こらなかった | [合] |
+| 4 | controlBuzzer() | state=1, currentMillis - prevBeepTime = 500ms | beepState が反転し tone/noTone が切替（境界値） | 切り替えを確認した | [合] |
+| 5 | controlBuzzer() | state=2, currentMillis - prevBeepTime = 199ms | 切替なし（境界値直前） | 切り替えは起こらなかった | [合] |
+| 6 | controlBuzzer() | state=2, currentMillis - prevBeepTime = 200ms | 1500Hz の断続音に切替（境界値） | 音の切り替えを確認した | [合] |
+| 7 | controlBuzzer() | state=3, 任意のcurrentMillis | 2000Hz の連続音が出る | 音の切り替えを確認した | [合] |
+| 8 | controlBuzzer() | state=-1, 任意のcurrentMillis | 強警告（2000Hz連続音）となる（想定外stateの安全動作） | 強警告を確認した | [合] |
+| 9 | controlBuzzer() | state=4, 任意のcurrentMillis | 強警告（2000Hz連続音）となる（想定外stateの安全動作） | 強警告を確認した | [合] |
+|10 | Serial出力 | 距離測定時 | Serial.println(distance) で距離が出力される | シリアルモニタで出力を確認した | [合] |
 
 ### 5-3. タイミング・並行動作テスト
 
 | No | テスト内容 | テスト手順 | 期待する結果 | 実際の結果 | 合否 |
 |:---|:---|:---|:---|:---|:---|
-| 1 | 測定周期100msの境界確認（入力系No.9/10） | currentMillis - prevMeasureTime を 99ms と 100ms に設定して loop() を実行 | 99msでは測定しない、100msで1回だけ測定する（境界値） | | [ ] |
-| 2 | 弱警告の切替境界確認（出力系No.3/4） | state=1 で currentMillis - prevBeepTime を 499ms と 500ms に設定して controlBuzzer() を実行 | 499msでは切替なし、500msでbeepStateが反転する（境界値） | | [ ] |
-| 3 | 中警告の切替境界確認（出力系No.5/6） | state=2 で currentMillis - prevBeepTime を 199ms と 200ms に設定して controlBuzzer() を実行 | 199msでは切替なし、200msで1500Hzの断続音へ切替（境界値） | | [ ] |
-| 4 | 並行動作確認（測定とブザー制御の独立性） | 連続ループ中に測定周期到達タイミングと断続音切替タイミングを重ねて実行 | 距離測定と音切替の両方が遅延なく実行される | | [ ] |
-| 5 | delay未使用確認（非ブロッキング動作） | 5秒連続実行し、シリアル出力の更新間隔と音切替間隔を観察 | 測定周期と音切替周期が継続し、処理停止が発生しない | | [ ] |
+| 1 | 測定周期100msの境界確認（入力系No.9/10） | currentMillis - prevMeasureTime を 99ms と 100ms に設定して loop() を実行 | 99msでは測定しない、100msで1回だけ測定する（境界値） | 実行の違いを確認した | [合] |
+| 2 | 弱警告の切替境界確認（出力系No.3/4） | state=1 で currentMillis - prevBeepTime を 499ms と 500ms に設定して controlBuzzer() を実行 | 499msでは切替なし、500msでbeepStateが反転する（境界値） | ブザーの音間隔の違いを確認した | [合] |
+| 3 | 中警告の切替境界確認（出力系No.5/6） | state=2 で currentMillis - prevBeepTime を 199ms と 200ms に設定して controlBuzzer() を実行 | 199msでは切替なし、200msで1500Hzの断続音へ切替（境界値） | ブザーの音が変化したのを確認した | [合] |
+| 4 | 並行動作確認（測定とブザー制御の独立性） | 連続ループ中に測定周期到達タイミングと断続音切替タイミングを重ねて実行 | 距離測定と音切替の両方が遅延なく実行される |  millisによる制御が正しくできていることを確認した | [合] |
+| 5 | delay未使用確認（非ブロッキング動作） | 5秒連続実行し、シリアル出力の更新間隔と音切替間隔を観察 | 測定周期と音切替周期が継続し、処理停止が発生しない | 処理の停止は確認できなかった | [合] |
 
 ---
 
