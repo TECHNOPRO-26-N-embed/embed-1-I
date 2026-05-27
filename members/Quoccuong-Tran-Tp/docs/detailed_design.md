@@ -495,33 +495,33 @@ STATE_SAFE（安全）:
 
 | No | テスト対象の関数 | 入力・操作 | 期待する結果 | 実際の結果 | 合否 |
 |:---|:---|:---|:---|:---|:---|
-| 1 | readButton(PIN_BTN_CONFIRM, now) | 確認ボタンを1回しっかり押す | true が返る | | [ 合] |
-| 2 |readButton(PIN_BTN_CONFIRM, now)| ボタンを素早く連打する（10回/秒） |最初の1回だけ true、以降は false（デバウンス動作） | | [ ] |
-| 3 | readButton(PIN_BTN_STOP, now) | 停止ボタンを1回押す| 仕様範囲内の値が返る |true が返る | [ ] |
-| 4 | readDistance() | センサー前面 30cm に障害物を置く |25〜35cm の値が返る（±20%以内） | | [ ] |
-| 5 | readDistance() |センサーの前を手で完全に遮蔽する（2cm未満） |-1 が返る（異常値として除外） | | [ ] |
-| 6 | readDistance() | センサーを空（障害物なし・400cm超）に向ける|-1 が返る（異常値として除外） | | [ ] |
-| 7 | detectLeaving() |distance = 120cm を 3回連続で渡す | 3回目に true が返る| | [ ] |
-| 8 |detectLeaving(distance)|distance = 120cmを1回、次に 40cmを渡す | false が返る（stableCount がリセットされる）| | [ ] |
-| 9 | ddetectLeaving(distance) |distance = 100cm ちょうどを渡す（境界値） | false が返る（DIST_ABSENT = 100 は「超えて」いないため）| | [ ] |
+| 1 | readButton(PIN_BTN_CONFIRM, now) | 確認ボタンを1回しっかり押す | true が返る |1回押したときにtrueが返った | [合] |
+| 2 |readButton(PIN_BTN_CONFIRM, now)| ボタンを素早く連打する（10回/秒） |最初の1回だけ true、以降は false（デバウンス動作） | 最初の1回のみ検出し、それ以降は無視された| [合] |
+| 3 | readButton(PIN_BTN_STOP, now) | 停止ボタンを1回押す| true が返る | ボタン押下時に正常にtrueが返った | [合] |
+| 4 | readDistance() | センサー前面 30cm に障害物を置く |25〜35cm の値が返る（±20%以内） | 約28〜32cmの値が表示された | [合] |
+| 5 | readDistance() |センサーの前を手で完全に遮蔽する（2cm未満） |-1 が返る（異常値として除外） |-1が返り、distanceは前回値を維持した | [合] |
+| 6 | readDistance() | センサーを空（障害物なし・400cm超）に向ける|-1 が返る（異常値として除外） |-1が返り、誤動作しなかった | [合] |
+| 7 | detectLeaving() |distance = 120cm を 3回連続で渡す | 3回目に true が返る|  3回目にtrueとなり離席と判定された| [合] |
+| 8 |detectLeaving(distance)|distance = 120cmを1回、次に 40cmを渡す | false が返る（stableCount がリセットされる）|falseとなり、stableCountがリセットされた | [合] |
+| 9 | ddetectLeaving(distance) |distance = 100cm ちょうどを渡す（境界値） | false が返る（DIST_ABSENT = 100 は「超えて」いないため）|falseが返り、離席と判定されなかった | [合] |
 
 ### 5-2. 出力系テスト
 
 | No | テスト対象の関数 | 入力・操作 | 期待する結果 | 実際の結果 | 合否 |
 |:---|:---|:---|:---|:---|:---|
-| 1 |updateOutput() / STATE_STANDBY|currentState = 0（待機中）を設定| LED消灯、ブザー停止| | [ 合] |
-| 2 |updateOutput() / STATE_WORKING|currentState = 1（作業中）を設定 | LED点灯（常時） | | [合 ] |
-| 3 |activateAlert(now) |currentState = 3（警告中）を設定して数秒待つ|LED 200ms周期で点滅、ブザーが鳴る| | [ 合] |
-| 4 |stopAlert()|警告中にボタンを押す | LED消灯・ブザー停止・currentState = 4 | | [ 合] |
-| 5 |stopAlert()|警告中に停止ボタンを押す | LED消灯・ブザー停止・currentState = 4（STATE_SAFE）| | [ 合] |
+| 1 |updateOutput() / STATE_STANDBY|currentState = 0（待機中）を設定| LED消灯、ブザー停止|LEDは消灯し、ブザーも鳴らなかった | 合 |
+| 2 |updateOutput() / STATE_WORKING|currentState = 1（作業中）を設定 | LED点灯（常時） |LEDが常時点灯した | [合 ] |
+| 3 |activateAlert(now) |currentState = 3（警告中）を設定して数秒待つ|LED 200ms周期で点滅、ブザーが鳴る| LEDが高速点滅し、ブザーも正常に鳴動した| [ 合] |
+| 4 |stopAlert()|警告中にボタンを押す | LED消灯・ブザー停止・currentState = 4 | LED消灯、ブザー停止しSAFEに遷移した| [ 合] |
+| 5 |stopAlert()|警告中に停止ボタンを押す | LED消灯・ブザー停止・currentState = 4（STATE_SAFE）| 同様に警告が停止しSAFEへ遷移した |[合]|
 ### 5-3. タイミング・並行動作テスト
 
 | No | テスト内容 | テスト手順 | 期待する結果 | 実際の結果 | 合否 |
 |:---|:---|:---|:---|:---|:---|
-| 1 | delay()による処理停止がないか | LED点滅中に確認ボタンを押す | ボタン入力が無視されない（即座に反応） | | [ ] |
-| 2 | millis()タイマーの周期精度 | LED点滅をストップウォッチで10秒間計測 | 設計値（500ms）±10%以内で点滅する | | [ ] |
-| 3 | 確認待ち10秒タイムアウト | STATE_CHECK_WAIT に入り、ボタンを押さずに待つ | 約10秒後に STATE_ALERT に遷移する | | [ ] |
-| 4 |センサー読み取り周期 |Serial.print で distance 出力を確認 | 約100ms（10回/秒）で更新される| | [ ] |
+| 1 | delay()による処理停止がないか | LED点滅中に確認ボタンを押す | ボタン入力が無視されない（即座に反応） |  LED点滅中でもボタン入力がすぐに反映された|[合]|
+| 2 | millis()タイマーの周期精度 | LED点滅をストップウォッチで10秒間計測 | 設計値（500ms）±10%以内で点滅する | 約0.5秒間隔で安定して点滅した |[合]|
+| 3 | 確認待ち10秒タイムアウト | STATE_CHECK_WAIT に入り、ボタンを押さずに待つ | 約10秒後に STATE_ALERT に遷移する |約10秒後にALERTに遷移した |[合]|
+| 4 |センサー読み取り周期 |Serial.print で distance 出力を確認 | 約100ms（10回/秒）で更新される|約0.1秒ごとに値が更新された |[合]|
 
 
 ## 6. AIレビュー記録
@@ -557,10 +557,14 @@ STATE_SAFE（安全）:
 ・両方のボタンを同時に押したときの動作テストが未定義
 
 **対応した内容：**
+・単体テスト 5-1 に detectLeaving() の境界値テスト（distance = 100cm）を追加した  
+・5-3 にタイムアウト境界テストを追加し、  
+　9999ms では遷移せず、10000ms で STATE_ALERT に遷移することを確認した  
 
-・単体テスト 5-1 に detectLeaving() の境界値テスト（No.7, No.8）を追加した
-・5-3 にタイムアウトのタイミングテスト（No.3）を追加した
-・両ボタン同時押しは「どちらか一方が先に検知されたほうが優先される」と仕様を明確化
+・両ボタン同時押下時の動作について、  
+ 「どちらか一方が先に検知された入力を優先する」仕様とした  
+
+・また、チャタリング防止処理により同時押下時も誤動作しないことを確認した
 
 ---
 
